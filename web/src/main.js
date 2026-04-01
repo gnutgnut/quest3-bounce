@@ -1,7 +1,10 @@
 import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
-import { ensureAudioContext, playBounce } from './audio.js';
+import { ensureAudioContext, playBounce, playHandHit } from './audio.js';
+import { initHandTracking } from './hands.js';
 import init, { World } from '../pkg/bounce_physics.js';
+
+const VERSION = '0.2.0';
 
 async function main() {
   // Init WASM
@@ -26,8 +29,14 @@ async function main() {
   renderer.xr.enabled = true;
   document.body.appendChild(renderer.domElement);
 
-  // VR button
-  document.body.appendChild(VRButton.createButton(renderer));
+  // VR button with hand-tracking as optional feature
+  const sessionInit = {
+    optionalFeatures: ['hand-tracking'],
+  };
+  document.body.appendChild(VRButton.createButton(renderer, sessionInit));
+
+  // Resume audio on XR session start
+  renderer.xr.addEventListener('sessionstart', () => ensureAudioContext());
 
   // Room dimensions (must match Rust: half-width=2, height=3, half-depth=2)
   const roomW = 4, roomH = 3, roomD = 4;
@@ -106,6 +115,7 @@ async function main() {
   // Ball glow (point light that follows the ball)
   const ballLight = new THREE.PointLight(0xff4488, 2, 5);
   ballLight.castShadow = true;
+  const defaultBallColor = new THREE.Color(0xff4488);
   scene.add(ballLight);
 
   // Ambient light
@@ -118,6 +128,20 @@ async function main() {
   dirLight.shadow.mapSize.width = 1024;
   dirLight.shadow.mapSize.height = 1024;
   scene.add(dirLight);
+
+  // Hand tracking
+  const handTracker = initHandTracking(renderer, scene);
+
+  // Version splash — 3D text sprite in scene
+  const versionSprite = createTextSprite(`quest3-bounce v${VERSION}`);
+  versionSprite.position.set(0, 2.0, -1.5);
+  versionSprite.scale.set(1.2, 0.3, 1);
+  scene.add(versionSprite);
+  let versionFadeStart = null;
+
+  // Also show version in the HTML overlay
+  const info = document.getElementById('info');
+  if (info) info.textContent = `quest3-bounce v${VERSION} — Click to enable audio`;
 
   // Enable audio on click
   document.addEventListener('click', () => ensureAudioContext(), { once: true });
@@ -138,20 +162,47 @@ async function main() {
     ball.position.set(bx, by, bz);
     ballLight.position.set(bx, by, bz);
 
-    // Flash ball on bounce
-    const bounceCount = world.get_bounce_count();
-    if (bounceCount > 0) {
-      ballMat.emissiveIntensity = 1.0;
-      ballLight.intensity = 6;
+    // Hand tracking
+    const handHits = handTracker.update(world, dt);
+
+    // Flash ball on hand hit (blue) or wall bounce (pink)
+    if (handHits.length > 0) {
+      ballMat.emissiveIntensity = 1.5;
+      ballLight.intensity = 8;
+      ballLight.color.set(0x88ccff);
     } else {
-      ballMat.emissiveIntensity = Math.max(0.3, ballMat.emissiveIntensity * 0.92);
-      ballLight.intensity = Math.max(2, ballLight.intensity * 0.92);
+      const bounceCount = world.get_bounce_count();
+      if (bounceCount > 0) {
+        ballMat.emissiveIntensity = 1.0;
+        ballLight.intensity = 6;
+        ballLight.color.copy(defaultBallColor);
+      } else {
+        ballMat.emissiveIntensity = Math.max(0.3, ballMat.emissiveIntensity * 0.92);
+        ballLight.intensity = Math.max(2, ballLight.intensity * 0.92);
+        ballLight.color.lerp(defaultBallColor, 0.1);
+      }
+
+      // Play wall bounce audio
+      for (let i = 0; i < bounceCount; i++) {
+        const ev = world.get_bounce_event(i);
+        playBounce(ev[0], ev[1], ev[2], ev[3]);
+      }
     }
 
-    // Play bounce audio
-    for (let i = 0; i < bounceCount; i++) {
-      const ev = world.get_bounce_event(i);
-      playBounce(ev[0], ev[1], ev[2], ev[3]);
+    // Play hand hit audio
+    for (const hit of handHits) {
+      playHandHit(hit.x, hit.y, hit.z, hit.intensity);
+    }
+
+    // Fade out version splash after 4 seconds
+    if (!versionFadeStart) versionFadeStart = clock.elapsedTime;
+    const elapsed = clock.elapsedTime - versionFadeStart;
+    if (elapsed > 4 && versionSprite.visible) {
+      versionSprite.material.opacity = Math.max(0, 1.0 - (elapsed - 4) / 2);
+      if (versionSprite.material.opacity <= 0) {
+        versionSprite.visible = false;
+        scene.remove(versionSprite);
+      }
     }
 
     renderer.render(scene, camera);
@@ -163,6 +214,31 @@ async function main() {
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
+}
+
+function createTextSprite(text) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = 'rgba(0, 0, 0, 0)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.font = 'bold 36px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(136, 204, 255, 0.9)';
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    opacity: 1.0,
+    depthTest: false,
+  });
+  return new THREE.Sprite(material);
 }
 
 main().catch(console.error);

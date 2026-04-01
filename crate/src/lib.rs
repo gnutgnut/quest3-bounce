@@ -162,6 +162,16 @@ impl World {
         self.bounce_events.push(intensity.min(10.0));
     }
 
+    pub fn apply_impulse(&mut self, vx: f32, vy: f32, vz: f32) {
+        self.vel[0] += vx;
+        self.vel[1] += vy;
+        self.vel[2] += vz;
+    }
+
+    pub fn get_radius(&self) -> f32 {
+        self.radius
+    }
+
     fn add_jitter(&mut self) {
         self.vel[0] += (pseudo_random() - 0.5) * 0.3;
         self.vel[2] += (pseudo_random() - 0.5) * 0.3;
