@@ -2,184 +2,252 @@ use wasm_bindgen::prelude::*;
 
 const GRAVITY: f32 = -9.81;
 const RESTITUTION: f32 = 0.85;
-const MAX_BOUNCES: usize = 16;
+const MAX_BOUNCES: usize = 64;
+const MAX_BALLS: usize = 1000;
+const ATTRACT_STRENGTH: f32 = 3.0;
+const ATTRACT_MIN_DIST: f32 = 0.15;
 
-#[wasm_bindgen]
-pub struct World {
-    // Ball state
+struct Ball {
     pos: [f32; 3],
     vel: [f32; 3],
     radius: f32,
+}
+
+#[wasm_bindgen]
+pub struct World {
+    balls: Vec<Ball>,
 
     // Room half-extents (centered at origin, floor at y=0)
-    room_w: f32, // half-width (x)
-    room_h: f32, // height (y, floor=0 ceiling=room_h)
-    room_d: f32, // half-depth (z)
+    room_w: f32,
+    room_h: f32,
+    room_d: f32,
 
-    // Bounce events from last step: [x, y, z, intensity, ...]
+    // Hand attractor positions (up to 2 hands)
+    attractors: Vec<[f32; 3]>,
+
+    // Bounce events from last step: [ball_index, x, y, z, intensity, ...]
     bounce_events: Vec<f32>,
+
+    game_over: bool,
+}
+
+impl Ball {
+    fn new_random() -> Ball {
+        Ball {
+            pos: [
+                (pseudo_random() - 0.5) * 2.0,
+                2.0 + pseudo_random() * 0.8,
+                (pseudo_random() - 0.5) * 2.0,
+            ],
+            vel: [
+                (pseudo_random() - 0.5) * 3.0,
+                pseudo_random() * 2.0,
+                (pseudo_random() - 0.5) * 3.0,
+            ],
+            radius: 0.15,
+        }
+    }
 }
 
 #[wasm_bindgen]
 impl World {
     #[wasm_bindgen(constructor)]
     pub fn new() -> World {
-        World {
-            pos: [0.0, 2.5, -2.0],
-            vel: [1.8, 0.0, -1.2],
-            radius: 0.15,
+        let mut w = World {
+            balls: Vec::new(),
             room_w: 2.0,
             room_h: 3.0,
             room_d: 2.0,
+            attractors: Vec::new(),
             bounce_events: Vec::new(),
+            game_over: false,
+        };
+        // Start with one ball
+        w.balls.push(Ball {
+            pos: [0.0, 2.5, -1.0],
+            vel: [1.8, 0.0, -1.2],
+            radius: 0.15,
+        });
+        w
+    }
+
+    pub fn spawn_ball(&mut self) {
+        if self.balls.len() < MAX_BALLS {
+            self.balls.push(Ball::new_random());
+        }
+        if self.balls.len() >= MAX_BALLS {
+            self.game_over = true;
+        }
+    }
+
+    pub fn is_game_over(&self) -> bool {
+        self.game_over
+    }
+
+    pub fn ball_count(&self) -> usize {
+        self.balls.len()
+    }
+
+    pub fn set_attractors(&mut self, coords: &[f32]) {
+        self.attractors.clear();
+        let mut i = 0;
+        while i + 2 < coords.len() {
+            self.attractors.push([coords[i], coords[i + 1], coords[i + 2]]);
+            i += 3;
         }
     }
 
     pub fn step(&mut self, dt: f32) {
         self.bounce_events.clear();
-
-        // Clamp dt to prevent explosion on tab-switch
         let dt = dt.min(0.05);
 
-        // Apply gravity
-        self.vel[1] += GRAVITY * dt;
+        for bi in 0..self.balls.len() {
+            let ball = &mut self.balls[bi];
 
-        // Integrate position
-        self.pos[0] += self.vel[0] * dt;
-        self.pos[1] += self.vel[1] * dt;
-        self.pos[2] += self.vel[2] * dt;
+            // Gravity
+            ball.vel[1] += GRAVITY * dt;
 
-        // Collision detection & response against 6 planes
-        // Floor (y = radius)
-        if self.pos[1] < self.radius {
-            self.pos[1] = self.radius;
-            let intensity = (-self.vel[1]).max(0.0);
-            self.vel[1] = -self.vel[1] * RESTITUTION;
-            self.add_jitter();
-            if intensity > 0.3 {
-                self.push_bounce(intensity);
+            // Hand attraction
+            for attr in &self.attractors {
+                let dx = attr[0] - ball.pos[0];
+                let dy = attr[1] - ball.pos[1];
+                let dz = attr[2] - ball.pos[2];
+                let dist_sq = dx * dx + dy * dy + dz * dz;
+                let dist = dist_sq.sqrt().max(ATTRACT_MIN_DIST);
+                // Inverse-distance attraction (not inverse-square, feels better)
+                let force = ATTRACT_STRENGTH / dist;
+                let inv_dist = 1.0 / dist;
+                ball.vel[0] += dx * inv_dist * force * dt;
+                ball.vel[1] += dy * inv_dist * force * dt;
+                ball.vel[2] += dz * inv_dist * force * dt;
+            }
+
+            // Integrate
+            ball.pos[0] += ball.vel[0] * dt;
+            ball.pos[1] += ball.vel[1] * dt;
+            ball.pos[2] += ball.vel[2] * dt;
+
+            // Wall collisions — inline for correct coordinate reporting
+            // Floor
+            if ball.pos[1] < ball.radius {
+                ball.pos[1] = ball.radius;
+                let intensity = (-ball.vel[1]).max(0.0);
+                ball.vel[1] = -ball.vel[1] * RESTITUTION;
+                if intensity > 0.3 { Self::push_bounce_ev(&mut self.bounce_events, bi, &ball.pos, intensity); }
+            }
+            // Ceiling
+            if ball.pos[1] > self.room_h - ball.radius {
+                ball.pos[1] = self.room_h - ball.radius;
+                let intensity = ball.vel[1].max(0.0);
+                ball.vel[1] = -ball.vel[1] * RESTITUTION;
+                if intensity > 0.3 { Self::push_bounce_ev(&mut self.bounce_events, bi, &ball.pos, intensity); }
+            }
+            // Left wall
+            if ball.pos[0] < -self.room_w + ball.radius {
+                ball.pos[0] = -self.room_w + ball.radius;
+                let intensity = (-ball.vel[0]).max(0.0);
+                ball.vel[0] = -ball.vel[0] * RESTITUTION;
+                if intensity > 0.3 { Self::push_bounce_ev(&mut self.bounce_events, bi, &ball.pos, intensity); }
+            }
+            // Right wall
+            if ball.pos[0] > self.room_w - ball.radius {
+                ball.pos[0] = self.room_w - ball.radius;
+                let intensity = ball.vel[0].max(0.0);
+                ball.vel[0] = -ball.vel[0] * RESTITUTION;
+                if intensity > 0.3 { Self::push_bounce_ev(&mut self.bounce_events, bi, &ball.pos, intensity); }
+            }
+            // Back wall
+            if ball.pos[2] < -self.room_d + ball.radius {
+                ball.pos[2] = -self.room_d + ball.radius;
+                let intensity = (-ball.vel[2]).max(0.0);
+                ball.vel[2] = -ball.vel[2] * RESTITUTION;
+                if intensity > 0.3 { Self::push_bounce_ev(&mut self.bounce_events, bi, &ball.pos, intensity); }
+            }
+            // Front wall
+            if ball.pos[2] > self.room_d - ball.radius {
+                ball.pos[2] = self.room_d - ball.radius;
+                let intensity = ball.vel[2].max(0.0);
+                ball.vel[2] = -ball.vel[2] * RESTITUTION;
+                if intensity > 0.3 { Self::push_bounce_ev(&mut self.bounce_events, bi, &ball.pos, intensity); }
+            }
+
+            // Auto-kick when nearly stopped (only if no attractors active)
+            if self.attractors.is_empty() {
+                let speed_sq = ball.vel[0] * ball.vel[0]
+                    + ball.vel[1] * ball.vel[1]
+                    + ball.vel[2] * ball.vel[2];
+                if speed_sq < 0.1 && ball.pos[1] < ball.radius + 0.01 {
+                    ball.vel[1] = 4.0 + pseudo_random() * 2.0;
+                    ball.vel[0] = (pseudo_random() - 0.5) * 3.0;
+                    ball.vel[2] = (pseudo_random() - 0.5) * 3.0;
+                }
             }
         }
+    }
 
-        // Ceiling (y = room_h - radius)
-        if self.pos[1] > self.room_h - self.radius {
-            self.pos[1] = self.room_h - self.radius;
-            let intensity = self.vel[1].max(0.0);
-            self.vel[1] = -self.vel[1] * RESTITUTION;
-            if intensity > 0.3 {
-                self.push_bounce(intensity);
-            }
-        }
-
-        // Left wall (x = -room_w + radius)
-        if self.pos[0] < -self.room_w + self.radius {
-            self.pos[0] = -self.room_w + self.radius;
-            let intensity = (-self.vel[0]).max(0.0);
-            self.vel[0] = -self.vel[0] * RESTITUTION;
-            if intensity > 0.3 {
-                self.push_bounce(intensity);
-            }
-        }
-
-        // Right wall (x = room_w - radius)
-        if self.pos[0] > self.room_w - self.radius {
-            self.pos[0] = self.room_w - self.radius;
-            let intensity = self.vel[0].max(0.0);
-            self.vel[0] = -self.vel[0] * RESTITUTION;
-            if intensity > 0.3 {
-                self.push_bounce(intensity);
-            }
-        }
-
-        // Back wall (z = -room_d + radius)
-        if self.pos[2] < -self.room_d + self.radius {
-            self.pos[2] = -self.room_d + self.radius;
-            let intensity = (-self.vel[2]).max(0.0);
-            self.vel[2] = -self.vel[2] * RESTITUTION;
-            if intensity > 0.3 {
-                self.push_bounce(intensity);
-            }
-        }
-
-        // Front wall (z = room_d - radius)
-        if self.pos[2] > self.room_d - self.radius {
-            self.pos[2] = self.room_d - self.radius;
-            let intensity = self.vel[2].max(0.0);
-            self.vel[2] = -self.vel[2] * RESTITUTION;
-            if intensity > 0.3 {
-                self.push_bounce(intensity);
-            }
-        }
-
-        // If ball has nearly stopped, give it a kick
-        let speed_sq = self.vel[0] * self.vel[0]
-            + self.vel[1] * self.vel[1]
-            + self.vel[2] * self.vel[2];
-        if speed_sq < 0.1 && self.pos[1] < self.radius + 0.01 {
-            self.vel[1] = 4.0 + pseudo_random() * 2.0;
-            self.vel[0] = (pseudo_random() - 0.5) * 3.0;
-            self.vel[2] = (pseudo_random() - 0.5) * 3.0;
+    fn push_bounce_ev(events: &mut Vec<f32>, ball_idx: usize, pos: &[f32; 3], intensity: f32) {
+        if events.len() / 5 < MAX_BOUNCES {
+            events.push(ball_idx as f32);
+            events.push(pos[0]);
+            events.push(pos[1]);
+            events.push(pos[2]);
+            events.push(intensity.min(10.0));
         }
     }
 
-    pub fn get_x(&self) -> f32 {
-        self.pos[0]
+    pub fn get_ball_x(&self, i: usize) -> f32 {
+        self.balls.get(i).map_or(0.0, |b| b.pos[0])
     }
 
-    pub fn get_y(&self) -> f32 {
-        self.pos[1]
+    pub fn get_ball_y(&self, i: usize) -> f32 {
+        self.balls.get(i).map_or(0.0, |b| b.pos[1])
     }
 
-    pub fn get_z(&self) -> f32 {
-        self.pos[2]
-    }
-
-    pub fn get_bounce_count(&self) -> usize {
-        self.bounce_events.len() / 4
-    }
-
-    pub fn get_bounce_event(&self, index: usize) -> Vec<f32> {
-        let i = index * 4;
-        if i + 3 < self.bounce_events.len() {
-            vec![
-                self.bounce_events[i],
-                self.bounce_events[i + 1],
-                self.bounce_events[i + 2],
-                self.bounce_events[i + 3],
-            ]
-        } else {
-            vec![0.0, 0.0, 0.0, 0.0]
-        }
-    }
-
-    fn push_bounce(&mut self, intensity: f32) {
-        if self.bounce_events.len() / 4 >= MAX_BOUNCES {
-            return;
-        }
-        self.bounce_events.push(self.pos[0]);
-        self.bounce_events.push(self.pos[1]);
-        self.bounce_events.push(self.pos[2]);
-        self.bounce_events.push(intensity.min(10.0));
-    }
-
-    pub fn apply_impulse(&mut self, vx: f32, vy: f32, vz: f32) {
-        self.vel[0] += vx;
-        self.vel[1] += vy;
-        self.vel[2] += vz;
+    pub fn get_ball_z(&self, i: usize) -> f32 {
+        self.balls.get(i).map_or(0.0, |b| b.pos[2])
     }
 
     pub fn get_radius(&self) -> f32 {
-        self.radius
+        0.15
     }
 
-    fn add_jitter(&mut self) {
-        self.vel[0] += (pseudo_random() - 0.5) * 0.3;
-        self.vel[2] += (pseudo_random() - 0.5) * 0.3;
+    // Keep old API for compatibility
+    pub fn get_x(&self) -> f32 { self.get_ball_x(0) }
+    pub fn get_y(&self) -> f32 { self.get_ball_y(0) }
+    pub fn get_z(&self) -> f32 { self.get_ball_z(0) }
+
+    pub fn get_bounce_count(&self) -> usize {
+        self.bounce_events.len() / 5
+    }
+
+    pub fn get_bounce_event(&self, index: usize) -> Vec<f32> {
+        let i = index * 5;
+        if i + 4 < self.bounce_events.len() {
+            vec![
+                self.bounce_events[i],     // ball index
+                self.bounce_events[i + 1], // x
+                self.bounce_events[i + 2], // y
+                self.bounce_events[i + 3], // z
+                self.bounce_events[i + 4], // intensity
+            ]
+        } else {
+            vec![0.0, 0.0, 0.0, 0.0, 0.0]
+        }
+    }
+
+    pub fn apply_impulse(&mut self, vx: f32, vy: f32, vz: f32) {
+        self.apply_impulse_to(0, vx, vy, vz);
+    }
+
+    pub fn apply_impulse_to(&mut self, i: usize, vx: f32, vy: f32, vz: f32) {
+        if let Some(ball) = self.balls.get_mut(i) {
+            ball.vel[0] += vx;
+            ball.vel[1] += vy;
+            ball.vel[2] += vz;
+        }
     }
 }
 
-// Simple deterministic pseudo-random (no std rand in wasm)
-// Uses js_sys::Math::random for actual randomness
 fn pseudo_random() -> f32 {
     js_sys::Math::random() as f32
 }

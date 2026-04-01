@@ -20,6 +20,8 @@ class HandTracker {
     this.hands = [];
     this.tempVec = new THREE.Vector3();
     this.ballPos = new THREE.Vector3();
+    // Palm positions for gravity attractors (updated each frame)
+    this.palmPositions = [];
 
     const handModelFactory = new XRHandModelFactory();
 
@@ -32,15 +34,36 @@ class HandTracker {
       this.hands.push({
         controller,
         prevPositions: new Map(),
-        lastHitTime: 0,
+        lastHitTimes: new Map(), // per-ball cooldowns
       });
     }
   }
 
+  /** Returns Float32Array of palm positions [x,y,z, x,y,z, ...] for attractors */
+  getPalmPositions() {
+    this.palmPositions.length = 0;
+    for (const hand of this.hands) {
+      const joints = hand.controller.joints;
+      if (!joints) continue;
+      // Use middle-finger-metacarpal as palm center, fallback to wrist
+      const palmJoint = joints['middle-finger-metacarpal'] || joints['wrist'];
+      if (!palmJoint || !palmJoint.visible) continue;
+      palmJoint.getWorldPosition(this.tempVec);
+      this.palmPositions.push(this.tempVec.x, this.tempVec.y, this.tempVec.z);
+    }
+    return new Float32Array(this.palmPositions);
+  }
+
+  /**
+   * Check collisions against all balls.
+   * @param {World} world
+   * @param {number} dt
+   * @returns {Array<{ballIndex, x, y, z, intensity}>}
+   */
   update(world, dt) {
     const hits = [];
     const ballRadius = world.get_radius();
-    this.ballPos.set(world.get_x(), world.get_y(), world.get_z());
+    const ballCount = world.ball_count();
 
     for (const hand of this.hands) {
       const joints = hand.controller.joints;
@@ -55,7 +78,6 @@ class HandTracker {
         const jy = this.tempVec.y;
         const jz = this.tempVec.z;
 
-        // Compute velocity from previous frame
         let vx = 0, vy = 0, vz = 0;
         const prev = hand.prevPositions.get(jointName);
         if (prev && dt > 0.001) {
@@ -63,40 +85,45 @@ class HandTracker {
           vy = (jy - prev.y) / dt;
           vz = (jz - prev.z) / dt;
         }
-
         if (!prev) {
           hand.prevPositions.set(jointName, new THREE.Vector3(jx, jy, jz));
         } else {
           prev.set(jx, jy, jz);
         }
 
-        // Sphere-sphere collision
-        const jointRadius = joint.jointRadius || 0.01;
-        const hitDist = ballRadius + jointRadius;
-        const dx = jx - this.ballPos.x;
-        const dy = jy - this.ballPos.y;
-        const dz = jz - this.ballPos.z;
-        const distSq = dx * dx + dy * dy + dz * dz;
+        const speed = Math.sqrt(vx * vx + vy * vy + vz * vz);
+        if (speed < MIN_HIT_SPEED) continue;
 
-        if (distSq < hitDist * hitDist) {
-          const now = performance.now() / 1000;
-          if (now - hand.lastHitTime < HIT_COOLDOWN) continue;
+        // Check against all balls
+        for (let bi = 0; bi < ballCount; bi++) {
+          const bx = world.get_ball_x(bi);
+          const by = world.get_ball_y(bi);
+          const bz = world.get_ball_z(bi);
 
-          const speed = Math.sqrt(vx * vx + vy * vy + vz * vz);
-          if (speed < MIN_HIT_SPEED) continue;
+          const jointRadius = joint.jointRadius || 0.01;
+          const hitDist = ballRadius + jointRadius;
+          const dx = jx - bx;
+          const dy = jy - by;
+          const dz = jz - bz;
+          const distSq = dx * dx + dy * dy + dz * dz;
 
-          hand.lastHitTime = now;
+          if (distSq < hitDist * hitDist) {
+            const now = performance.now() / 1000;
+            const cooldownKey = `${bi}`;
+            if ((hand.lastHitTimes.get(cooldownKey) || 0) + HIT_COOLDOWN > now) continue;
+            hand.lastHitTimes.set(cooldownKey, now);
 
-          // Clamp impulse so ball can't go to infinity
-          const factor = Math.min(speed, 8.0) / Math.max(speed, 0.001) * 1.5;
-          world.apply_impulse(vx * factor, vy * factor, vz * factor);
+            const factor = Math.min(speed, 8.0) / Math.max(speed, 0.001) * 1.5;
+            world.apply_impulse_to(bi, vx * factor, vy * factor, vz * factor);
 
-          hits.push({
-            x: jx, y: jy, z: jz,
-            intensity: Math.min(speed / 3.0, 1.0),
-          });
+            hits.push({
+              ballIndex: bi,
+              x: jx, y: jy, z: jz,
+              intensity: Math.min(speed / 3.0, 1.0),
+            });
 
-          break; // one hit per hand per frame
+            break; // one hit per joint per frame
+          }
         }
       }
     }
