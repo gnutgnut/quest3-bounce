@@ -134,8 +134,8 @@ async function main() {
 
   // Version splash — 3D text sprite in scene
   const versionSprite = createTextSprite(`quest3-bounce v${VERSION}`);
-  versionSprite.position.set(0, 2.0, -1.5);
-  versionSprite.scale.set(1.2, 0.3, 1);
+  versionSprite.position.set(0, 1.8, -1.2);
+  versionSprite.scale.set(3.0, 0.75, 1);
   scene.add(versionSprite);
   let versionFadeStart = null;
 
@@ -225,7 +225,7 @@ function createTextSprite(text) {
   ctx.fillStyle = 'rgba(0, 0, 0, 0)';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  ctx.font = 'bold 36px monospace';
+  ctx.font = 'bold 64px monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = 'rgba(136, 204, 255, 0.9)';
