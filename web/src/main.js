@@ -4,7 +4,7 @@ import { ensureAudioContext, playBounce, playHandHit } from './audio.js';
 import { initHandTracking } from './hands.js';
 import init, { World } from '../pkg/bounce_physics.js';
 
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 const SPAWN_INTERVAL = 15.0;
 const BALL_COLORS = [
   0xff4488, 0x44ff88, 0x4488ff, 0xffaa22, 0xaa44ff,
@@ -130,9 +130,9 @@ async function main() {
   const handTracker = initHandTracking(renderer, scene);
 
   // Version splash
-  const versionSprite = createTextSprite(`quest3-bounce v${VERSION}`);
-  versionSprite.position.set(0, 1.8, -1.2);
-  versionSprite.scale.set(3.0, 0.75, 1);
+  const versionSprite = createTextSprite(`v${VERSION}`, 48);
+  versionSprite.position.set(0, 2.2, -1.5);
+  versionSprite.scale.set(1.2, 0.3, 1);
   scene.add(versionSprite);
   let versionFadeStart = null;
 
@@ -146,9 +146,9 @@ async function main() {
   let gameOver = false;
 
   // Game over splash (hidden initially)
-  const gameOverSprite = createTextSprite('GAME OVER — 1000 BALLS');
+  const gameOverSprite = createTextSprite('GAME OVER', 64);
   gameOverSprite.position.set(0, 1.6, -1.0);
-  gameOverSprite.scale.set(3.0, 0.75, 1);
+  gameOverSprite.scale.set(1.5, 0.4, 1);
   gameOverSprite.visible = false;
   scene.add(gameOverSprite);
 
@@ -178,9 +178,16 @@ async function main() {
       return;
     }
 
-    // Pass hand positions as gravity attractors
-    const palms = handTracker.getPalmPositions();
-    world.set_attractors(palms);
+    // Quit on B/Y button
+    if (handTracker.shouldQuit()) {
+      const session = renderer.xr.getSession();
+      if (session) session.end();
+      return;
+    }
+
+    // Pass hand positions + trigger strength as gravity attractors
+    const attractors = handTracker.getAttractors();
+    world.set_attractors(attractors);
 
     // Step physics
     world.step(dt);
@@ -259,14 +266,14 @@ async function main() {
   });
 }
 
-function createTextSprite(text) {
+function createTextSprite(text, fontSize = 48) {
   const canvas = document.createElement('canvas');
   canvas.width = 512;
   canvas.height = 128;
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = 'rgba(0, 0, 0, 0)';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.font = 'bold 64px monospace';
+  ctx.font = `bold ${fontSize}px monospace`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = 'rgba(136, 204, 255, 0.9)';

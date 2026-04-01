@@ -23,7 +23,7 @@ pub struct World {
     room_d: f32,
 
     // Hand attractor positions (up to 2 hands)
-    attractors: Vec<[f32; 3]>,
+    attractors: Vec<[f32; 4]>,  // [x, y, z, strength_multiplier]
 
     // Bounce events from last step: [ball_index, x, y, z, intensity, ...]
     bounce_events: Vec<f32>,
@@ -88,12 +88,14 @@ impl World {
         self.balls.len()
     }
 
+    /// Set attractor positions with per-attractor strength multiplier.
+    /// Format: [x, y, z, strength, x, y, z, strength, ...]
     pub fn set_attractors(&mut self, coords: &[f32]) {
         self.attractors.clear();
         let mut i = 0;
-        while i + 2 < coords.len() {
-            self.attractors.push([coords[i], coords[i + 1], coords[i + 2]]);
-            i += 3;
+        while i + 3 < coords.len() {
+            self.attractors.push([coords[i], coords[i + 1], coords[i + 2], coords[i + 3]]);
+            i += 4;
         }
     }
 
@@ -112,10 +114,10 @@ impl World {
                 let dx = attr[0] - ball.pos[0];
                 let dy = attr[1] - ball.pos[1];
                 let dz = attr[2] - ball.pos[2];
+                let strength_mult = attr[3];
                 let dist_sq = dx * dx + dy * dy + dz * dz;
                 let dist = dist_sq.sqrt().max(ATTRACT_MIN_DIST);
-                // Inverse-distance attraction (not inverse-square, feels better)
-                let force = ATTRACT_STRENGTH / dist;
+                let force = ATTRACT_STRENGTH * strength_mult / dist;
                 let inv_dist = 1.0 / dist;
                 ball.vel[0] += dx * inv_dist * force * dt;
                 ball.vel[1] += dy * inv_dist * force * dt;
