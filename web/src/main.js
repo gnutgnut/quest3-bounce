@@ -5,8 +5,10 @@ import { initHandTracking } from './hands.js';
 import { PerfWatch } from './watch.js';
 import init, { World } from '../pkg/bounce_physics.js';
 
-const VERSION = '0.6.3';
-const SPAWN_INTERVAL = 15.0;
+const VERSION = '0.6.4';
+const SPAWN_INTERVAL_START = 15.0;
+const SPAWN_INTERVAL_MIN = 2.0;
+const SPAWN_ACCEL = 0.95; // multiply interval by this each spawn
 const VERSION_POLL_INTERVAL = 10000; // 10 seconds
 const BALL_COLORS = [
   0xff4488, 0x44ff88, 0x4488ff, 0xffaa22, 0xaa44ff,
@@ -291,6 +293,7 @@ async function main() {
   document.addEventListener('click', () => ensureAudioContext(), { once: true });
 
   // Spawn timer
+  let spawnInterval = SPAWN_INTERVAL_START;
   let lastSpawnTime = restoredLastSpawn;
   let gameOver = false;
   let gameOverTime = 0;
@@ -375,6 +378,7 @@ async function main() {
     winnerSprite.visible = false;
     clearCelebration();
     lastSpawnTime = elapsed;
+    spawnInterval = SPAWN_INTERVAL_START;
     restoredElapsed = 0;
     updateCounter(world.ball_count());
   }
@@ -417,11 +421,12 @@ async function main() {
       return;
     }
 
-    // Spawn a new ball every SPAWN_INTERVAL seconds
-    if (elapsed - lastSpawnTime > SPAWN_INTERVAL) {
+    // Spawn balls at increasing rate
+    if (elapsed - lastSpawnTime > spawnInterval) {
       world.spawn_ball();
       playSpawn();
       lastSpawnTime = elapsed;
+      spawnInterval = Math.max(SPAWN_INTERVAL_MIN, spawnInterval * SPAWN_ACCEL);
     }
 
     // Check game over
