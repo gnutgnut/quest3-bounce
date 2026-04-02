@@ -2,21 +2,34 @@ let audioCtx = null;
 
 /**
  * Speak text in a robotic voice using Web Speech API.
+ * Handles async voice loading on Quest/Chrome.
  * @param {string} text
  */
 export function speakRobot(text) {
   if (!window.speechSynthesis) return;
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.pitch = 0.3;
-  utter.rate = 0.9;
-  utter.volume = 1.0;
-  // Try to pick a robotic-sounding voice
-  const voices = speechSynthesis.getVoices();
-  const robot = voices.find(v => /english/i.test(v.lang) && /male/i.test(v.name))
-    || voices.find(v => /en/i.test(v.lang))
-    || voices[0];
-  if (robot) utter.voice = robot;
-  speechSynthesis.speak(utter);
+
+  function doSpeak() {
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.pitch = 0.3;
+    utter.rate = 0.9;
+    utter.volume = 1.0;
+    const voices = speechSynthesis.getVoices();
+    const robot = voices.find(v => /en/i.test(v.lang) && /male/i.test(v.name))
+      || voices.find(v => /en[-_]/.test(v.lang))
+      || voices[0];
+    if (robot) utter.voice = robot;
+    speechSynthesis.cancel(); // clear any pending
+    speechSynthesis.speak(utter);
+  }
+
+  // Voices may not be loaded yet — wait for them
+  if (speechSynthesis.getVoices().length > 0) {
+    doSpeak();
+  } else {
+    speechSynthesis.addEventListener('voiceschanged', doSpeak, { once: true });
+    // Fallback: try anyway after a short delay
+    setTimeout(doSpeak, 500);
+  }
 }
 
 export function ensureAudioContext() {

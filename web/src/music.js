@@ -96,7 +96,7 @@ export class MusicEngine {
     this.started = true;
 
     this.masterGain = ctx.createGain();
-    this.masterGain.gain.value = 0.15;
+    this.masterGain.gain.value = 0.35;
     this.masterGain.connect(ctx.destination);
   }
 
@@ -338,15 +338,15 @@ export class MusicEngine {
   celebrationSwell() {
     if (!this.started) return;
     const now = this.ctx.currentTime;
-    this.masterGain.gain.setValueAtTime(0.15, now);
-    this.masterGain.gain.linearRampToValueAtTime(0.3, now + 0.3);
-    this.masterGain.gain.linearRampToValueAtTime(0.15, now + 4);
+    this.masterGain.gain.setValueAtTime(0.35, now);
+    this.masterGain.gain.linearRampToValueAtTime(0.55, now + 0.3);
+    this.masterGain.gain.linearRampToValueAtTime(0.35, now + 4);
   }
 
   gameOverDarken() {
     if (!this.started) return;
     const now = this.ctx.currentTime;
-    this.masterGain.gain.linearRampToValueAtTime(0.03, now + 1.5);
-    this.masterGain.gain.linearRampToValueAtTime(0.15, now + 5);
+    this.masterGain.gain.linearRampToValueAtTime(0.08, now + 1.5);
+    this.masterGain.gain.linearRampToValueAtTime(0.35, now + 5);
   }
 }
