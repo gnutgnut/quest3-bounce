@@ -6,17 +6,29 @@ const MAX_BOUNCES: usize = 64;
 const MAX_BALLS: usize = 20;
 const ATTRACT_STRENGTH: f32 = 3.0;
 const ATTRACT_MIN_DIST: f32 = 0.15;
+const BOND_SPEED_THRESHOLD: f32 = 0.8; // max relative speed to form bond
+const BOND_SPRING: f32 = 40.0;
+const BOND_DAMPING: f32 = 8.0;
+const BOND_BREAK_IMPULSE: f32 = 5.0;
+const MAX_BONDS: usize = 30;
 
 struct Ball {
     pos: [f32; 3],
     vel: [f32; 3],
     radius: f32,
-    mass: f32, // 0.5 = light/bouncy, 3.0 = heavy/sluggish
+    mass: f32,
+}
+
+struct Bond {
+    a: usize,
+    b: usize,
+    rest_dist: f32,
 }
 
 #[wasm_bindgen]
 pub struct World {
     balls: Vec<Ball>,
+    bonds: Vec<Bond>,
 
     // Room half-extents (centered at origin, floor at y=0)
     room_w: f32,
@@ -24,9 +36,9 @@ pub struct World {
     room_d: f32,
 
     // Hand attractor positions (up to 2 hands)
-    attractors: Vec<[f32; 4]>,  // [x, y, z, strength_multiplier]
+    attractors: Vec<[f32; 4]>,
 
-    // Bounce events from last step: [ball_index, x, y, z, intensity, ...]
+    // Bounce events from last step
     bounce_events: Vec<f32>,
 
     game_over: bool,
@@ -61,6 +73,7 @@ impl World {
     pub fn new() -> World {
         let mut w = World {
             balls: Vec::new(),
+            bonds: Vec::new(),
             room_w: 2.0,
             room_h: 3.0,
             room_d: 2.0,
@@ -80,6 +93,7 @@ impl World {
 
     pub fn reset(&mut self) {
         self.balls.clear();
+        self.bonds.clear();
         self.game_over = false;
         self.bounce_events.clear();
         self.balls.push(Ball {
@@ -209,7 +223,7 @@ impl World {
             }
         }
 
-        // Ball-to-ball collisions (elastic, mass-weighted)
+        // Ball-to-ball collisions (elastic, mass-weighted) + bond formation
         let n = self.balls.len();
         for i in 0..n {
             for j in (i + 1)..n {
@@ -224,13 +238,24 @@ impl World {
                     let ny = dy / dist;
                     let nz = dz / dist;
 
-                    // Relative velocity along collision normal
                     let dvx = self.balls[i].vel[0] - self.balls[j].vel[0];
                     let dvy = self.balls[i].vel[1] - self.balls[j].vel[1];
                     let dvz = self.balls[i].vel[2] - self.balls[j].vel[2];
                     let dvn = dvx * nx + dvy * ny + dvz * nz;
+                    let rel_speed = (dvx * dvx + dvy * dvy + dvz * dvz).sqrt();
 
-                    // Only resolve if approaching
+                    // Bond formation: gentle contact + not already bonded
+                    if rel_speed < BOND_SPEED_THRESHOLD
+                        && self.bonds.len() < MAX_BONDS
+                        && !self.bonds.iter().any(|b|
+                            (b.a == i && b.b == j) || (b.a == j && b.b == i))
+                    {
+                        self.bonds.push(Bond {
+                            a: i, b: j,
+                            rest_dist: min_dist * 1.01,
+                        });
+                    }
+
                     if dvn > 0.0 {
                         let mi = self.balls[i].mass;
                         let mj = self.balls[j].mass;
@@ -244,7 +269,6 @@ impl World {
                         self.balls[j].vel[2] += impulse * mi * nz;
                     }
 
-                    // Separate overlapping balls
                     let overlap = min_dist - dist;
                     let total_mass = self.balls[i].mass + self.balls[j].mass;
                     let fi = self.balls[j].mass / total_mass;
@@ -257,6 +281,56 @@ impl World {
                     self.balls[j].pos[2] += nz * overlap * fj;
                 }
             }
+        }
+
+        // Apply bond spring forces + break bonds under stress
+        let mut broken = Vec::new();
+        for (bi, bond) in self.bonds.iter().enumerate() {
+            if bond.a >= self.balls.len() || bond.b >= self.balls.len() {
+                broken.push(bi);
+                continue;
+            }
+            let a = bond.a;
+            let b = bond.b;
+            let dx = self.balls[b].pos[0] - self.balls[a].pos[0];
+            let dy = self.balls[b].pos[1] - self.balls[a].pos[1];
+            let dz = self.balls[b].pos[2] - self.balls[a].pos[2];
+            let dist = (dx * dx + dy * dy + dz * dz).sqrt().max(0.001);
+            let stretch = dist - bond.rest_dist;
+
+            // Break if stretched too far
+            if stretch.abs() > bond.rest_dist * 0.8 {
+                broken.push(bi);
+                continue;
+            }
+
+            let nx = dx / dist;
+            let ny = dy / dist;
+            let nz = dz / dist;
+
+            // Spring force
+            let f = BOND_SPRING * stretch;
+            // Damping (relative velocity along bond axis)
+            let dvx = self.balls[b].vel[0] - self.balls[a].vel[0];
+            let dvy = self.balls[b].vel[1] - self.balls[a].vel[1];
+            let dvz = self.balls[b].vel[2] - self.balls[a].vel[2];
+            let dvn = dvx * nx + dvy * ny + dvz * nz;
+            let fd = BOND_DAMPING * dvn;
+
+            let total = f + fd;
+            let ma = self.balls[a].mass;
+            let mb = self.balls[b].mass;
+
+            self.balls[a].vel[0] += nx * total * dt / ma;
+            self.balls[a].vel[1] += ny * total * dt / ma;
+            self.balls[a].vel[2] += nz * total * dt / ma;
+            self.balls[b].vel[0] -= nx * total * dt / mb;
+            self.balls[b].vel[1] -= ny * total * dt / mb;
+            self.balls[b].vel[2] -= nz * total * dt / mb;
+        }
+        // Remove broken bonds (reverse order)
+        for &bi in broken.iter().rev() {
+            self.bonds.swap_remove(bi);
         }
     }
 
@@ -320,13 +394,26 @@ impl World {
             ball.vel[0] += vx * inv_mass;
             ball.vel[1] += vy * inv_mass;
             ball.vel[2] += vz * inv_mass;
+            // Break bonds on strong impulse
+            let impulse_mag = (vx * vx + vy * vy + vz * vz).sqrt() * inv_mass;
+            if impulse_mag > BOND_BREAK_IMPULSE {
+                self.bonds.retain(|b| b.a != i && b.b != i);
+            }
         }
     }
 
     /// Remove ball by index (swap-remove for O(1)). Returns true if removed.
     pub fn remove_ball(&mut self, i: usize) -> bool {
         if i < self.balls.len() {
+            let last = self.balls.len() - 1;
             self.balls.swap_remove(i);
+            // Fix bond indices: remove bonds involving i, remap last→i
+            self.bonds.retain_mut(|bond| {
+                if bond.a == i || bond.b == i { return false; }
+                if bond.a == last { bond.a = i; }
+                if bond.b == last { bond.b = i; }
+                true
+            });
             true
         } else {
             false
@@ -339,6 +426,15 @@ impl World {
 
     pub fn get_ball_mass(&self, i: usize) -> f32 {
         self.balls.get(i).map_or(1.0, |b| b.mass)
+    }
+
+    pub fn get_bond_count(&self) -> usize {
+        self.bonds.len()
+    }
+
+    /// Returns [a, b] indices for bond at given index
+    pub fn get_bond(&self, i: usize) -> Vec<usize> {
+        self.bonds.get(i).map_or(vec![0, 0], |b| vec![b.a, b.b])
     }
 
     /// Serialize all ball state: [count, x,y,z,vx,vy,vz,radius,mass, ...]

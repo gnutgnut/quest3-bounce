@@ -6,7 +6,7 @@ import { PerfWatch } from './watch.js';
 import { MusicEngine } from './music.js';
 import init, { World } from '../pkg/bounce_physics.js';
 
-const VERSION = '0.6.13';
+const VERSION = '0.6.14';
 const SPAWN_INTERVAL_START = 15.0;
 const SPAWN_INTERVAL_MIN = 2.0;
 const SPAWN_ACCEL = 0.95; // multiply interval by this each spawn
@@ -239,6 +239,56 @@ async function main() {
         scene.remove(ballLights[i].light);
         ballLights.splice(i, 1);
       }
+    }
+  }
+
+  // Bond lightning visuals
+  const bondLines = [];
+  const bondMat = new THREE.LineBasicMaterial({
+    color: 0xaaddff, transparent: true, opacity: 0.8, linewidth: 2,
+  });
+
+  function updateBonds() {
+    const bondCount = world.get_bond_count();
+    // Grow pool if needed
+    while (bondLines.length < bondCount) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute([0,0,0,0,0,0], 3));
+      const line = new THREE.Line(geo, bondMat.clone());
+      scene.add(line);
+      bondLines.push(line);
+    }
+    // Update visible bonds with zigzag lightning
+    for (let i = 0; i < bondCount; i++) {
+      const bond = world.get_bond(i);
+      const a = bond[0], b = bond[1];
+      if (a >= ballMeshes.length || b >= ballMeshes.length) {
+        bondLines[i].visible = false;
+        continue;
+      }
+      bondLines[i].visible = true;
+      const pa = ballMeshes[a].position;
+      const pb = ballMeshes[b].position;
+      // 4-segment zigzag lightning
+      const segs = 5;
+      const pts = new Float32Array(segs * 3);
+      for (let s = 0; s < segs; s++) {
+        const t = s / (segs - 1);
+        pts[s*3]   = pa.x + (pb.x - pa.x) * t + (s > 0 && s < segs-1 ? (Math.random()-0.5)*0.04 : 0);
+        pts[s*3+1] = pa.y + (pb.y - pa.y) * t + (s > 0 && s < segs-1 ? (Math.random()-0.5)*0.04 : 0);
+        pts[s*3+2] = pa.z + (pb.z - pa.z) * t + (s > 0 && s < segs-1 ? (Math.random()-0.5)*0.04 : 0);
+      }
+      bondLines[i].geometry.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+      bondLines[i].geometry.attributes.position.needsUpdate = true;
+      // Shimmer opacity
+      bondLines[i].material.opacity = 0.5 + Math.random() * 0.5;
+      // Color flicker
+      const hue = 0.55 + Math.random() * 0.1; // blue-cyan range
+      bondLines[i].material.color.setHSL(hue, 0.8, 0.7);
+    }
+    // Hide unused
+    for (let i = bondCount; i < bondLines.length; i++) {
+      bondLines[i].visible = false;
     }
   }
 
@@ -531,6 +581,9 @@ async function main() {
       }
       playBounce(ev[1], ev[2], ev[3], ev[4]);
     }
+
+    // Update bond lightning visuals
+    updateBonds();
 
     // Decay emissive on all balls
     for (const mesh of ballMeshes) {
