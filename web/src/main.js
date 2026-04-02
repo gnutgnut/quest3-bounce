@@ -6,7 +6,7 @@ import { PerfWatch } from './watch.js';
 import { MusicEngine } from './music.js';
 import init, { World } from '../pkg/bounce_physics.js';
 
-const VERSION = '0.6.18';
+const VERSION = '0.6.19';
 const SPAWN_INTERVAL_START = 15.0;
 const SPAWN_INTERVAL_MIN = 2.0;
 const SPAWN_ACCEL = 0.95; // multiply interval by this each spawn
@@ -97,31 +97,37 @@ async function main() {
 
   updateOrbitCamera();
 
-  // Device orientation (phone gyroscope) — rotate camera by tilting phone
-  let deviceOrientAlpha = 0, deviceOrientBeta = 0;
+  // Device orientation (phone gyroscope) — proper quaternion with level horizon
+  const _deviceQuat = new THREE.Quaternion();
+  const _euler = new THREE.Euler();
+  const _screenRotQ = new THREE.Quaternion();
+  const _worldFixQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
   let hasDeviceOrient = false;
 
   function onDeviceOrientation(e) {
     if (e.alpha === null) return;
     hasDeviceOrient = true;
-    deviceOrientAlpha = (e.alpha || 0) * Math.PI / 180;
-    deviceOrientBeta = (e.beta || 0) * Math.PI / 180;
+    const alpha = (e.alpha || 0) * Math.PI / 180; // yaw (compass)
+    const beta = (e.beta || 0) * Math.PI / 180;   // pitch (tilt front/back)
+    const gamma = (e.gamma || 0) * Math.PI / 180;  // roll (tilt left/right)
+
+    // Convert device Euler (ZXY order) to quaternion
+    _euler.set(beta, alpha, -gamma, 'YXZ');
+    _deviceQuat.setFromEuler(_euler);
+
+    // Rotate from device coords to world coords (screen faces up -> faces forward)
+    _deviceQuat.multiply(_worldFixQ);
+
+    // Account for screen orientation
+    const screenAngle = (window.screen.orientation?.angle || 0) * Math.PI / 180;
+    _screenRotQ.setFromAxisAngle(new THREE.Vector3(0, 0, 1), -screenAngle);
+    _deviceQuat.multiply(_screenRotQ);
   }
 
   function updateDeviceOrientCamera() {
     if (renderer.xr.isPresenting || !hasDeviceOrient) return;
-    // Phone held upright: beta ~90deg = looking forward
-    const yaw = -deviceOrientAlpha;
-    const pitch = -(deviceOrientBeta - Math.PI / 2);
-    const cy = Math.cos(yaw), sy = Math.sin(yaw);
-    const cp = Math.cos(pitch), sp = Math.sin(pitch);
     camera.position.copy(orbitCenter);
-    const lookTarget = new THREE.Vector3(
-      orbitCenter.x + sy * cp,
-      orbitCenter.y + sp,
-      orbitCenter.z + cy * cp,
-    );
-    camera.lookAt(lookTarget);
+    camera.quaternion.copy(_deviceQuat);
   }
 
   // Request permission on iOS 13+
