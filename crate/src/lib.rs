@@ -3,7 +3,7 @@ use wasm_bindgen::prelude::*;
 const GRAVITY: f32 = -9.81;
 const RESTITUTION: f32 = 0.85;
 const MAX_BOUNCES: usize = 64;
-const MAX_BALLS: usize = 1000;
+const MAX_BALLS: usize = 20;
 const ATTRACT_STRENGTH: f32 = 3.0;
 const ATTRACT_MIN_DIST: f32 = 0.15;
 

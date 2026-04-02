@@ -199,3 +199,83 @@ export function playGameOver() {
   osc2.start(now); osc2.stop(now + duration);
   osc3.start(now); osc3.stop(now + duration);
 }
+
+/**
+ * Play a shimmery tremolo-vibrato string splash for hot reload.
+ * Bright rising chord with fast tremolo and pitch wobble, ~1.5s.
+ */
+export function playHotReload() {
+  const ctx = ensureAudioContext();
+  if (!ctx) return;
+
+  const now = ctx.currentTime;
+  const duration = 1.5;
+
+  // Tremolo LFO — fast amplitude modulation
+  const tremoloLfo = ctx.createOscillator();
+  tremoloLfo.type = 'sine';
+  tremoloLfo.frequency.setValueAtTime(12, now);
+  tremoloLfo.frequency.linearRampToValueAtTime(6, now + duration);
+  const tremoloGain = ctx.createGain();
+  tremoloGain.gain.value = 0.4;
+  tremoloLfo.connect(tremoloGain);
+
+  // Vibrato LFO — pitch wobble
+  const vibratoLfo = ctx.createOscillator();
+  vibratoLfo.type = 'sine';
+  vibratoLfo.frequency.setValueAtTime(6, now);
+  const vibratoGain = ctx.createGain();
+  vibratoGain.gain.value = 8;
+  vibratoLfo.connect(vibratoGain);
+
+  // Three string voices in a bright major chord
+  const freqs = [880, 1108.73, 1318.51]; // A5, C#6, E6
+  const types = ['sawtooth', 'triangle', 'sawtooth'];
+  const masterGain = ctx.createGain();
+  masterGain.gain.setValueAtTime(0.001, now);
+  masterGain.gain.linearRampToValueAtTime(0.3, now + 0.05);
+  masterGain.gain.setValueAtTime(0.3, now + duration * 0.4);
+  masterGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+  // Connect tremolo to master gain (modulates amplitude)
+  tremoloGain.connect(masterGain.gain);
+
+  // Bright shimmer filter
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'bandpass';
+  filter.frequency.setValueAtTime(2000, now);
+  filter.frequency.exponentialRampToValueAtTime(4000, now + duration * 0.3);
+  filter.frequency.exponentialRampToValueAtTime(1500, now + duration);
+  filter.Q.value = 2;
+
+  masterGain.connect(filter);
+  filter.connect(ctx.destination);
+
+  for (let i = 0; i < freqs.length; i++) {
+    const osc = ctx.createOscillator();
+    osc.type = types[i];
+    osc.frequency.setValueAtTime(freqs[i], now);
+    osc.frequency.linearRampToValueAtTime(freqs[i] * 1.15, now + duration);
+    vibratoGain.connect(osc.frequency);
+    osc.detune.value = (i - 1) * 12;
+    osc.connect(masterGain);
+    osc.start(now);
+    osc.stop(now + duration);
+  }
+
+  // High sparkle layer
+  const sparkle = ctx.createOscillator();
+  sparkle.type = 'sine';
+  sparkle.frequency.setValueAtTime(3520, now);
+  sparkle.frequency.exponentialRampToValueAtTime(5000, now + duration * 0.5);
+  sparkle.frequency.exponentialRampToValueAtTime(2000, now + duration);
+  const sparkleGain = ctx.createGain();
+  sparkleGain.gain.setValueAtTime(0.08, now);
+  sparkleGain.gain.exponentialRampToValueAtTime(0.001, now + duration * 0.8);
+  sparkle.connect(sparkleGain).connect(filter);
+  sparkle.start(now);
+  sparkle.stop(now + duration);
+
+  tremoloLfo.start(now); tremoloLfo.stop(now + duration);
+  vibratoLfo.start(now); vibratoLfo.stop(now + duration);
+}

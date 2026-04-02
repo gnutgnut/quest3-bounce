@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
-import { ensureAudioContext, playBounce, playHandHit, playGameOver } from './audio.js';
+import { ensureAudioContext, playBounce, playHandHit, playGameOver, playHotReload } from './audio.js';
 import { initHandTracking } from './hands.js';
 import init, { World } from '../pkg/bounce_physics.js';
 
@@ -82,6 +82,7 @@ async function main() {
   }
 
   function triggerHotReload() {
+    playHotReload();
     // Save game state
     const stateArray = Array.from(world.serialize_state());
     const elapsed = clock.elapsedTime + restoredElapsed;
@@ -268,7 +269,7 @@ async function main() {
       gameOver = true;
       gameOverSprite.visible = true;
       playGameOver();
-      if (info) info.textContent = `GAME OVER — 1000 balls in ${Math.floor(elapsed)}s`;
+      if (info) info.textContent = `GAME OVER — ${world.ball_count()} balls in ${Math.floor(elapsed)}s`;
       return;
     }
 
