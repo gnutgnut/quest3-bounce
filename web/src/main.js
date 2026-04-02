@@ -5,7 +5,7 @@ import { initHandTracking } from './hands.js';
 import { PerfWatch } from './watch.js';
 import init, { World } from '../pkg/bounce_physics.js';
 
-const VERSION = '0.5.0';
+const VERSION = '0.6.0';
 const SPAWN_INTERVAL = 15.0;
 const VERSION_POLL_INTERVAL = 10000; // 10 seconds
 const BALL_COLORS = [
