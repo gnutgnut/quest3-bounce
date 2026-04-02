@@ -1,7 +1,7 @@
 use wasm_bindgen::prelude::*;
 
 const GRAVITY: f32 = -9.81;
-const RESTITUTION: f32 = 0.85;
+const RESTITUTION: f32 = 0.75;
 const MAX_BOUNCES: usize = 64;
 const MAX_BALLS: usize = 20;
 const ATTRACT_STRENGTH: f32 = 3.0;
@@ -34,8 +34,10 @@ pub struct World {
 
 impl Ball {
     fn new_random() -> Ball {
-        let mass = 0.5 + pseudo_random() * 2.5; // 0.5 to 3.0
-        let radius = 0.08 + mass * 0.04; // 0.10 to 0.20 — heavier = bigger
+        // Skew toward heavy: square the random to bias high
+        let r = pseudo_random();
+        let mass = 1.0 + r * r * 7.0; // 1.0 to 8.0, mostly 3-8
+        let radius = 0.08 + mass * 0.02; // 0.10 to 0.24 — heavier = bigger
         Ball {
             pos: [
                 (pseudo_random() - 0.5) * 2.0,
@@ -43,9 +45,9 @@ impl Ball {
                 (pseudo_random() - 0.5) * 2.0,
             ],
             vel: [
-                (pseudo_random() - 0.5) * 3.0,
-                pseudo_random() * 2.0,
-                (pseudo_random() - 0.5) * 3.0,
+                (pseudo_random() - 0.5) * 2.0,
+                pseudo_random() * 1.0,
+                (pseudo_random() - 0.5) * 2.0,
             ],
             radius,
             mass,
@@ -199,9 +201,10 @@ impl World {
                     + ball.vel[1] * ball.vel[1]
                     + ball.vel[2] * ball.vel[2];
                 if speed_sq < 0.1 && ball.pos[1] < ball.radius + 0.01 {
-                    ball.vel[1] = 4.0 + pseudo_random() * 2.0;
-                    ball.vel[0] = (pseudo_random() - 0.5) * 3.0;
-                    ball.vel[2] = (pseudo_random() - 0.5) * 3.0;
+                    let kick = inv_mass * 2.0; // lighter balls kick higher
+                    ball.vel[1] = (2.0 + pseudo_random() * 1.5) * kick;
+                    ball.vel[0] = (pseudo_random() - 0.5) * 2.0 * kick;
+                    ball.vel[2] = (pseudo_random() - 0.5) * 2.0 * kick;
                 }
             }
         }
