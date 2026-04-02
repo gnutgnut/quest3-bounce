@@ -6,7 +6,7 @@ import { PerfWatch } from './watch.js';
 import { MusicEngine } from './music.js';
 import init, { World } from '../pkg/bounce_physics.js';
 
-const VERSION = '0.6.20';
+const VERSION = '0.6.21';
 const SPAWN_INTERVAL_START = 15.0;
 const SPAWN_INTERVAL_MIN = 2.0;
 const SPAWN_ACCEL = 0.95; // multiply interval by this each spawn
@@ -481,6 +481,7 @@ async function main() {
 
   let touchScreenX = 0, touchScreenY = 0;
   let touchBallIdx = -1;
+  let touchPopped = false;
 
   renderer.domElement.addEventListener('pointerdown', (e) => {
     if (renderer.xr.isPresenting) return;
@@ -509,6 +510,7 @@ async function main() {
       world.remove_ball(touchBallIdx);
       removeBallMesh(touchBallIdx);
       playPop(bx, by, bz);
+      touchPopped = true;
     }
     touchDown = false;
     touchHolding = false;
@@ -728,8 +730,10 @@ async function main() {
       playPop(pop.x, pop.y, pop.z);
     }
 
-    // Check for winner — all balls destroyed!
-    if (pops.length > 0 && world.ball_count() === 0) {
+    // Check for winner — all balls destroyed (blade or touch pop)
+    const hadPop = pops.length > 0 || touchPopped;
+    touchPopped = false;
+    if (hadPop && world.ball_count() === 0) {
       winnerActive = true;
       winnerTime = elapsed;
       winnerSprite.visible = true;
