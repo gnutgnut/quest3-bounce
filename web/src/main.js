@@ -6,7 +6,7 @@ import { PerfWatch } from './watch.js';
 import { MusicEngine } from './music.js';
 import init, { World } from '../pkg/bounce_physics.js';
 
-const VERSION = '0.6.19';
+const VERSION = '0.6.20';
 const SPAWN_INTERVAL_START = 15.0;
 const SPAWN_INTERVAL_MIN = 2.0;
 const SPAWN_ACCEL = 0.95; // multiply interval by this each spawn
@@ -76,7 +76,7 @@ async function main() {
 
   function onDragStart(x, y) { dragActive = true; dragX = x; dragY = y; }
   function onDragMove(x, y) {
-    if (!dragActive) return;
+    if (!dragActive || touchHolding) return;
     orbitYaw += (x - dragX) * 0.005;
     orbitPitch = Math.max(-0.8, Math.min(0.8, orbitPitch + (y - dragY) * 0.005));
     dragX = x; dragY = y;
@@ -447,6 +447,73 @@ async function main() {
   document.addEventListener('touchstart', enableAudio, { passive: true });
   document.addEventListener('pointerdown', enableAudio);
 
+  // Touch interaction: tap to pop, hold to grab (hi-grav attractor)
+  const raycaster = new THREE.Raycaster();
+  const touchNDC = new THREE.Vector2();
+  let touchDown = false;
+  let touchStartTime = 0;
+  let touchHolding = false;
+  let touchAttractPos = new THREE.Vector3();
+  const TAP_MAX_DURATION = 0.25; // seconds — shorter = tap (pop), longer = hold (grab)
+
+  function screenToNDC(x, y) {
+    touchNDC.x = (x / window.innerWidth) * 2 - 1;
+    touchNDC.y = -(y / window.innerHeight) * 2 + 1;
+  }
+
+  function findBallAtScreen(x, y) {
+    screenToNDC(x, y);
+    raycaster.setFromCamera(touchNDC, camera);
+    const hits = raycaster.intersectObjects(ballMeshes, false);
+    if (hits.length === 0) return -1;
+    return ballMeshes.indexOf(hits[0].object);
+  }
+
+  function get3DPointAtDepth(x, y, depth) {
+    screenToNDC(x, y);
+    raycaster.setFromCamera(touchNDC, camera);
+    const dir = raycaster.ray.direction;
+    const origin = raycaster.ray.origin;
+    // Project ray to given depth along camera forward
+    touchAttractPos.copy(dir).multiplyScalar(depth).add(origin);
+    return touchAttractPos;
+  }
+
+  let touchScreenX = 0, touchScreenY = 0;
+  let touchBallIdx = -1;
+
+  renderer.domElement.addEventListener('pointerdown', (e) => {
+    if (renderer.xr.isPresenting) return;
+    touchDown = true;
+    touchStartTime = performance.now() / 1000;
+    touchHolding = false;
+    touchScreenX = e.clientX;
+    touchScreenY = e.clientY;
+    touchBallIdx = findBallAtScreen(e.clientX, e.clientY);
+  });
+
+  renderer.domElement.addEventListener('pointermove', (e) => {
+    if (!touchDown || renderer.xr.isPresenting) return;
+    touchScreenX = e.clientX;
+    touchScreenY = e.clientY;
+  });
+
+  renderer.domElement.addEventListener('pointerup', (e) => {
+    if (!touchDown || renderer.xr.isPresenting) { touchDown = false; return; }
+    const duration = performance.now() / 1000 - touchStartTime;
+    // Tap = pop the ball
+    if (duration < TAP_MAX_DURATION && touchBallIdx >= 0 && touchBallIdx < ballMeshes.length) {
+      const bx = world.get_ball_x(touchBallIdx);
+      const by = world.get_ball_y(touchBallIdx);
+      const bz = world.get_ball_z(touchBallIdx);
+      world.remove_ball(touchBallIdx);
+      removeBallMesh(touchBallIdx);
+      playPop(bx, by, bz);
+    }
+    touchDown = false;
+    touchHolding = false;
+  });
+
   // Spawn timer
   let spawnInterval = SPAWN_INTERVAL_START;
   let lastSpawnTime = restoredLastSpawn;
@@ -607,9 +674,29 @@ async function main() {
       return;
     }
 
-    // Pass hand positions + trigger strength as gravity attractors
+    // Touch hold → become hi-grav attractor
+    if (touchDown && !renderer.xr.isPresenting) {
+      const elapsed2 = performance.now() / 1000 - touchStartTime;
+      if (elapsed2 > TAP_MAX_DURATION) {
+        touchHolding = true;
+      }
+    }
+
+    // Pass hand positions + touch attractor as gravity attractors
     const attractors = handTracker.getAttractors();
-    world.set_attractors(attractors);
+    if (touchHolding) {
+      // Project touch point into scene at ~2m depth
+      get3DPointAtDepth(touchScreenX, touchScreenY, 2.0);
+      const combined = new Float32Array(attractors.length + 4);
+      combined.set(attractors);
+      combined[attractors.length] = touchAttractPos.x;
+      combined[attractors.length + 1] = touchAttractPos.y;
+      combined[attractors.length + 2] = touchAttractPos.z;
+      combined[attractors.length + 3] = 10.0; // hi-grav strength
+      world.set_attractors(combined);
+    } else {
+      world.set_attractors(attractors);
+    }
 
     // Step physics
     world.step(dt);
