@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { playBladeExtend, playBladeSwoosh } from './audio.js';
 
 const COLLISION_JOINTS = [
   'wrist',
@@ -22,6 +23,8 @@ const ALL_JOINTS = [
 const HIT_COOLDOWN = 0.25;
 const MIN_HIT_SPEED = 0.3;
 const TRIGGER_GRAVITY_MULTIPLIER = 10.0;
+const BLADE_LENGTH = 0.25;
+const BLADE_POP_RADIUS = 0.03;
 
 class HandTracker {
   constructor(renderer, scene) {
@@ -66,6 +69,37 @@ class HandTracker {
         triggerPressed: false,
       });
     }
+
+    // Assassin's Creed hidden blade on left wrist
+    const bladeGroup = new THREE.Group();
+    // Blade shaft
+    const bladeGeo = new THREE.ConeGeometry(0.006, BLADE_LENGTH, 6);
+    const bladeMat = new THREE.MeshStandardMaterial({
+      color: 0xcccccc, roughness: 0.1, metalness: 1.0,
+      emissive: 0xaaaaff, emissiveIntensity: 0.3,
+    });
+    const bladeMesh = new THREE.Mesh(bladeGeo, bladeMat);
+    bladeMesh.rotation.x = -Math.PI / 2; // point forward along -Z
+    bladeMesh.position.z = -BLADE_LENGTH / 2 - 0.02; // extend from wrist
+    bladeGroup.add(bladeMesh);
+
+    // Blade guard (small box at base)
+    const guardGeo = new THREE.BoxGeometry(0.025, 0.008, 0.012);
+    const guardMat = new THREE.MeshStandardMaterial({
+      color: 0x444444, roughness: 0.3, metalness: 0.9,
+    });
+    const guard = new THREE.Mesh(guardGeo, guardMat);
+    guard.position.z = -0.02;
+    bladeGroup.add(guard);
+
+    bladeGroup.visible = false;
+    scene.add(bladeGroup);
+    this.bladeGroup = bladeGroup;
+    this.bladeTip = new THREE.Vector3();
+    this.bladeQuat = new THREE.Quaternion();
+    this.bladeWasVisible = false;
+    this.bladePrevPos = new THREE.Vector3();
+    this.bladeSwooshCooldown = 0;
 
     // Also set up controller inputs for trigger/button detection
     this.controllers = [];
@@ -130,6 +164,15 @@ class HandTracker {
     return states[0].buttonB || states[1].buttonB;
   }
 
+  /** Get the left hand's wrist joint (for blade attachment) */
+  getLeftWrist() {
+    const hand = this.hands[0]; // left hand
+    if (!hand) return null;
+    const joints = hand.handGroup.joints;
+    if (!joints || !joints['wrist'] || !joints['wrist'].visible) return null;
+    return joints['wrist'];
+  }
+
   /** Get the right hand's wrist joint (for watch attachment) */
   getRightWrist() {
     const hand = this.hands[1]; // right hand
@@ -155,11 +198,67 @@ class HandTracker {
     }
   }
 
+  /** Update blade position and check for ball pops. Returns [{ballIndex, x, y, z}] */
+  updateBlade(world, dt) {
+    const wrist = this.getLeftWrist();
+    if (!wrist) {
+      this.bladeGroup.visible = false;
+      this.bladeWasVisible = false;
+      return [];
+    }
+
+    // Play extend sound when blade first appears
+    if (!this.bladeWasVisible) {
+      playBladeExtend();
+      this.bladeWasVisible = true;
+      this.bladePrevPos.copy(this.tempVec);
+    }
+
+    this.bladeGroup.visible = true;
+    wrist.getWorldPosition(this.tempVec);
+    wrist.getWorldQuaternion(this.bladeQuat);
+    this.bladeGroup.position.copy(this.tempVec);
+    this.bladeGroup.quaternion.copy(this.bladeQuat);
+
+    // Swoosh sound based on wrist speed
+    this.bladeSwooshCooldown -= dt;
+    const bladeSpeed = this.tempVec.distanceTo(this.bladePrevPos) / Math.max(dt, 0.001);
+    this.bladePrevPos.copy(this.tempVec);
+    if (bladeSpeed > 1.5 && this.bladeSwooshCooldown <= 0) {
+      playBladeSwoosh(bladeSpeed);
+      this.bladeSwooshCooldown = 0.15;
+    }
+
+    // Compute blade tip position in world space
+    this.bladeTip.set(0, 0, -BLADE_LENGTH - 0.02);
+    this.bladeTip.applyQuaternion(this.bladeQuat);
+    this.bladeTip.add(this.tempVec);
+
+    // Check blade tip against all balls
+    const pops = [];
+    const ballCount = world.ball_count();
+    for (let i = ballCount - 1; i >= 0; i--) {
+      const bx = world.get_ball_x(i);
+      const by = world.get_ball_y(i);
+      const bz = world.get_ball_z(i);
+      const br = world.get_ball_radius(i);
+      const dx = this.bladeTip.x - bx;
+      const dy = this.bladeTip.y - by;
+      const dz = this.bladeTip.z - bz;
+      const distSq = dx * dx + dy * dy + dz * dz;
+      const hitDist = br + BLADE_POP_RADIUS;
+      if (distSq < hitDist * hitDist) {
+        pops.push({ ballIndex: i, x: bx, y: by, z: bz });
+        world.remove_ball(i);
+      }
+    }
+    return pops;
+  }
+
   update(world, dt) {
     this.updateVisuals();
 
     const hits = [];
-    const ballRadius = world.get_radius();
     const ballCount = world.ball_count();
 
     for (const hand of this.hands) {
@@ -197,7 +296,7 @@ class HandTracker {
           const bz = world.get_ball_z(bi);
 
           const jointRadius = joint.jointRadius || 0.01;
-          const hitDist = ballRadius + jointRadius;
+          const hitDist = world.get_ball_radius(bi) + jointRadius;
           const dx = jx - bx;
           const dy = jy - by;
           const dz = jz - bz;

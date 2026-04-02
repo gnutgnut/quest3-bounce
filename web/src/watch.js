@@ -73,6 +73,7 @@ export class PerfWatch {
     // Temps
     this._pos = new THREE.Vector3();
     this._quat = new THREE.Quaternion();
+    this._rotOffset = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2);
     this._offset = new THREE.Vector3(0, 0.02, 0); // above wrist
   }
 
@@ -100,7 +101,7 @@ export class PerfWatch {
     const offset = this._offset.clone().applyQuaternion(this._quat);
     this._pos.add(offset);
     this.group.position.copy(this._pos);
-    this.group.quaternion.copy(this._quat);
+    this.group.quaternion.copy(this._quat).multiply(this._rotOffset);
 
     // Update display periodically
     this.lastUpdate += dt;

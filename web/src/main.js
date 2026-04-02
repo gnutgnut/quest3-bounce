@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
-import { ensureAudioContext, playBounce, playHandHit, playGameOver, playHotReload, playSpawn } from './audio.js';
+import { ensureAudioContext, playBounce, playHandHit, playGameOver, playHotReload, playSpawn, playPop } from './audio.js';
 import { initHandTracking } from './hands.js';
 import { PerfWatch } from './watch.js';
 import init, { World } from '../pkg/bounce_physics.js';
@@ -155,32 +155,83 @@ async function main() {
   grid.position.y = 0.001;
   scene.add(grid);
 
-  // Shared ball geometry
-  const ballGeo = new THREE.SphereGeometry(0.15, 32, 32);
+  // Ball geometry cache (keyed by radius rounded to 2 decimals)
+  const ballGeoCache = new Map();
+  function getBallGeo(radius) {
+    const key = Math.round(radius * 100);
+    if (!ballGeoCache.has(key)) {
+      ballGeoCache.set(key, new THREE.SphereGeometry(radius, 24, 24));
+    }
+    return ballGeoCache.get(key);
+  }
+
+  // Ball material styles — varied textures
+  const BALL_STYLES = [
+    { roughness: 0.1, metalness: 0.9 },  // chrome
+    { roughness: 0.8, metalness: 0.1 },  // matte rubber
+    { roughness: 0.3, metalness: 0.6 },  // satin
+    { roughness: 0.05, metalness: 1.0 }, // mirror
+    { roughness: 0.6, metalness: 0.3 },  // clay
+  ];
 
   // Ball management
   const ballMeshes = [];
   const ballLights = [];
 
+  function createBallMesh(idx) {
+    const color = BALL_COLORS[idx % BALL_COLORS.length];
+    const style = BALL_STYLES[idx % BALL_STYLES.length];
+    const radius = world.get_ball_radius(idx);
+    const mat = new THREE.MeshStandardMaterial({
+      color,
+      roughness: style.roughness,
+      metalness: style.metalness,
+      emissive: color,
+      emissiveIntensity: 0.3,
+    });
+    const mesh = new THREE.Mesh(getBallGeo(radius), mat);
+    mesh.castShadow = true;
+    return mesh;
+  }
+
   function ensureBallMeshes() {
     const count = world.ball_count();
     while (ballMeshes.length < count) {
       const idx = ballMeshes.length;
-      const color = BALL_COLORS[idx % BALL_COLORS.length];
-      const mat = new THREE.MeshStandardMaterial({
-        color, roughness: 0.2, metalness: 0.8,
-        emissive: color, emissiveIntensity: 0.3,
-      });
-      const mesh = new THREE.Mesh(ballGeo, mat);
-      mesh.castShadow = true;
+      const mesh = createBallMesh(idx);
       scene.add(mesh);
       ballMeshes.push(mesh);
 
       // One light per ball (limit to first 5 for performance)
       if (idx < 5) {
+        const color = BALL_COLORS[idx % BALL_COLORS.length];
         const light = new THREE.PointLight(color, 2, 4);
         scene.add(light);
         ballLights.push({ light, ballIdx: idx });
+      }
+    }
+  }
+
+  /** Remove ball mesh at index (mirrors Rust swap_remove) */
+  function removeBallMesh(idx) {
+    if (idx >= ballMeshes.length) return;
+    const last = ballMeshes.length - 1;
+    // Remove mesh from scene
+    scene.remove(ballMeshes[idx]);
+    if (idx < last) {
+      // Swap last mesh into removed slot
+      ballMeshes[idx] = ballMeshes[last];
+    }
+    ballMeshes.pop();
+    // Fix up lights that referenced the swapped ball
+    for (const bl of ballLights) {
+      if (bl.ballIdx === last) bl.ballIdx = idx;
+    }
+    // Remove lights for balls that no longer exist
+    for (let i = ballLights.length - 1; i >= 0; i--) {
+      if (ballLights[i].ballIdx >= ballMeshes.length) {
+        scene.remove(ballLights[i].light);
+        ballLights.splice(i, 1);
       }
     }
   }
@@ -341,6 +392,13 @@ async function main() {
     for (const bl of ballLights) {
       const mesh = ballMeshes[bl.ballIdx];
       if (mesh) bl.light.position.copy(mesh.position);
+    }
+
+    // Blade pops (before hand collisions — removes balls, indices shift)
+    const pops = handTracker.updateBlade(world, dt);
+    for (const pop of pops) {
+      removeBallMesh(pop.ballIndex);
+      playPop(pop.x, pop.y, pop.z);
     }
 
     // Hand tracking collisions

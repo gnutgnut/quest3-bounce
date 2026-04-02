@@ -355,3 +355,133 @@ export function playSpawn() {
   osc3.start(now + duration * 0.2); osc3.stop(now + duration);
   wobbleLfo.start(now); wobbleLfo.stop(now + duration);
 }
+
+/**
+ * Play a sharp pop sound when a ball is destroyed by the blade.
+ * @param {number} x
+ * @param {number} y
+ * @param {number} z
+ */
+export function playPop(x, y, z) {
+  const ctx = ensureAudioContext();
+  if (!ctx) return;
+
+  const now = ctx.currentTime;
+
+  const panner = ctx.createPanner();
+  panner.panningModel = 'HRTF';
+  panner.distanceModel = 'inverse';
+  panner.refDistance = 1;
+  panner.maxDistance = 10;
+  panner.setPosition(x, y, z);
+  panner.connect(ctx.destination);
+
+  // Sharp transient pop
+  const osc1 = ctx.createOscillator();
+  osc1.type = 'sine';
+  osc1.frequency.setValueAtTime(600, now);
+  osc1.frequency.exponentialRampToValueAtTime(80, now + 0.1);
+  const gain1 = ctx.createGain();
+  gain1.gain.setValueAtTime(0.6, now);
+  gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+
+  // Noise-like burst
+  const osc2 = ctx.createOscillator();
+  osc2.type = 'square';
+  osc2.frequency.setValueAtTime(2000 + Math.random() * 2000, now);
+  osc2.frequency.exponentialRampToValueAtTime(100, now + 0.05);
+  const gain2 = ctx.createGain();
+  gain2.gain.setValueAtTime(0.25, now);
+  gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+
+  // Airy release
+  const osc3 = ctx.createOscillator();
+  osc3.type = 'triangle';
+  osc3.frequency.setValueAtTime(1200, now);
+  osc3.frequency.exponentialRampToValueAtTime(300, now + 0.2);
+  const gain3 = ctx.createGain();
+  gain3.gain.setValueAtTime(0.1, now);
+  gain3.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+
+  osc1.connect(gain1).connect(panner);
+  osc2.connect(gain2).connect(panner);
+  osc3.connect(gain3).connect(panner);
+
+  osc1.start(now); osc1.stop(now + 0.15);
+  osc2.start(now); osc2.stop(now + 0.08);
+  osc3.start(now); osc3.stop(now + 0.25);
+}
+
+/**
+ * Play a metallic blade extend/unsheathe "shing" sound.
+ */
+export function playBladeExtend() {
+  const ctx = ensureAudioContext();
+  if (!ctx) return;
+
+  const now = ctx.currentTime;
+  const duration = 0.3;
+
+  // Metallic ring — high sine sweep
+  const osc1 = ctx.createOscillator();
+  osc1.type = 'sine';
+  osc1.frequency.setValueAtTime(3000, now);
+  osc1.frequency.exponentialRampToValueAtTime(6000, now + 0.05);
+  osc1.frequency.exponentialRampToValueAtTime(2000, now + duration);
+  const gain1 = ctx.createGain();
+  gain1.gain.setValueAtTime(0.2, now);
+  gain1.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+  // Scrape — filtered noise-like
+  const osc2 = ctx.createOscillator();
+  osc2.type = 'sawtooth';
+  osc2.frequency.setValueAtTime(800, now);
+  osc2.frequency.exponentialRampToValueAtTime(4000, now + 0.08);
+  osc2.frequency.exponentialRampToValueAtTime(1000, now + duration);
+  const gain2 = ctx.createGain();
+  gain2.gain.setValueAtTime(0.08, now);
+  gain2.gain.exponentialRampToValueAtTime(0.001, now + duration * 0.5);
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'highpass';
+  filter.frequency.value = 2000;
+  filter.Q.value = 3;
+
+  osc1.connect(gain1).connect(ctx.destination);
+  osc2.connect(gain2).connect(filter).connect(ctx.destination);
+
+  osc1.start(now); osc1.stop(now + duration);
+  osc2.start(now); osc2.stop(now + duration);
+}
+
+/**
+ * Play a blade swoosh sound — movement through air.
+ * @param {number} speed - hand speed (higher = more intense)
+ */
+export function playBladeSwoosh(speed) {
+  const ctx = ensureAudioContext();
+  if (!ctx) return;
+
+  const now = ctx.currentTime;
+  const vol = Math.min(speed / 5.0, 0.3);
+  const duration = 0.15 + vol * 0.1;
+
+  // Whoosh — filtered noise sweep
+  const osc = ctx.createOscillator();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(100 + speed * 50, now);
+  osc.frequency.exponentialRampToValueAtTime(50, now + duration);
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(vol, now);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'bandpass';
+  filter.frequency.setValueAtTime(500 + speed * 200, now);
+  filter.frequency.exponentialRampToValueAtTime(200, now + duration);
+  filter.Q.value = 1.5;
+
+  osc.connect(gain).connect(filter).connect(ctx.destination);
+  osc.start(now); osc.stop(now + duration);
+}
