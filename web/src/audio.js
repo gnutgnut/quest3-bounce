@@ -1,5 +1,24 @@
 let audioCtx = null;
 
+/**
+ * Speak text in a robotic voice using Web Speech API.
+ * @param {string} text
+ */
+export function speakRobot(text) {
+  if (!window.speechSynthesis) return;
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.pitch = 0.3;
+  utter.rate = 0.9;
+  utter.volume = 1.0;
+  // Try to pick a robotic-sounding voice
+  const voices = speechSynthesis.getVoices();
+  const robot = voices.find(v => /english/i.test(v.lang) && /male/i.test(v.name))
+    || voices.find(v => /en/i.test(v.lang))
+    || voices[0];
+  if (robot) utter.voice = robot;
+  speechSynthesis.speak(utter);
+}
+
 export function ensureAudioContext() {
   if (!audioCtx) {
     audioCtx = new AudioContext();

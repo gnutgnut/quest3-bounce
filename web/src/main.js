@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
-import { ensureAudioContext, playBounce, playHandHit, playGameOver, playHotReload, playSpawn, playPop, playWinner } from './audio.js';
+import { ensureAudioContext, speakRobot, playBounce, playHandHit, playGameOver, playHotReload, playSpawn, playPop, playWinner } from './audio.js';
 import { initHandTracking } from './hands.js';
 import { PerfWatch } from './watch.js';
 import init, { World } from '../pkg/bounce_physics.js';
 
-const VERSION = '0.6.6';
+const VERSION = '0.6.7';
 const SPAWN_INTERVAL_START = 15.0;
 const SPAWN_INTERVAL_MIN = 2.0;
 const SPAWN_ACCEL = 0.95; // multiply interval by this each spawn
@@ -58,7 +58,10 @@ async function main() {
   // VR button
   const sessionInit = { optionalFeatures: ['hand-tracking'] };
   document.body.appendChild(VRButton.createButton(renderer, sessionInit));
-  renderer.xr.addEventListener('sessionstart', () => ensureAudioContext());
+  renderer.xr.addEventListener('sessionstart', () => {
+    ensureAudioContext();
+    speakRobot(`Quest 3 Bounce. Version ${VERSION}. Destroy all balls.`);
+  });
 
   // Auto-enter VR after hot reload (requires user gesture on most browsers, but Quest 3 may allow it)
   if (wasHotReload && navigator.xr) {
