@@ -238,6 +238,8 @@ async function main() {
   // Spawn timer
   let lastSpawnTime = restoredLastSpawn;
   let gameOver = false;
+  let gameOverTime = 0;
+  const GAME_OVER_DURATION = 4.0; // seconds to show game over before restart
 
   // Game over splash (hidden initially)
   const gameOverSprite = createTextSprite('GAME OVER', 64);
@@ -246,17 +248,43 @@ async function main() {
   gameOverSprite.visible = false;
   scene.add(gameOverSprite);
 
+  function restartGame(elapsed) {
+    world.reset();
+    // Remove extra ball meshes from scene
+    while (ballMeshes.length > 1) {
+      const mesh = ballMeshes.pop();
+      scene.remove(mesh);
+    }
+    // Remove extra lights
+    while (ballLights.length > 1) {
+      const bl = ballLights.pop();
+      scene.remove(bl.light);
+    }
+    gameOver = false;
+    gameOverSprite.visible = false;
+    lastSpawnTime = elapsed;
+    restoredElapsed = 0;
+    updateCounter(world.ball_count());
+  }
+
   // Animation loop
   const clock = new THREE.Clock();
 
   renderer.setAnimationLoop(() => {
+    const dt = Math.min(clock.getDelta(), 0.05);
+    const elapsed = clock.elapsedTime + restoredElapsed;
+
     if (gameOver) {
+      // Fade out game over sprite, then restart
+      const sinceOver = elapsed - gameOverTime;
+      if (sinceOver > GAME_OVER_DURATION) {
+        restartGame(elapsed);
+      } else if (sinceOver > GAME_OVER_DURATION - 1) {
+        gameOverSprite.material.opacity = Math.max(0, (GAME_OVER_DURATION - sinceOver));
+      }
       renderer.render(scene, camera);
       return;
     }
-
-    const dt = Math.min(clock.getDelta(), 0.05);
-    const elapsed = clock.elapsedTime + restoredElapsed;
 
     // Spawn a new ball every SPAWN_INTERVAL seconds
     if (elapsed - lastSpawnTime > SPAWN_INTERVAL) {
@@ -268,9 +296,12 @@ async function main() {
     // Check game over
     if (world.is_game_over()) {
       gameOver = true;
+      gameOverTime = elapsed;
       gameOverSprite.visible = true;
+      gameOverSprite.material.opacity = 1.0;
       playGameOver();
       if (info) info.textContent = `GAME OVER — ${world.ball_count()} balls in ${Math.floor(elapsed)}s`;
+      renderer.render(scene, camera);
       return;
     }
 

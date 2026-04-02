@@ -71,6 +71,17 @@ impl World {
         w
     }
 
+    pub fn reset(&mut self) {
+        self.balls.clear();
+        self.game_over = false;
+        self.bounce_events.clear();
+        self.balls.push(Ball {
+            pos: [0.0, 2.5, -1.0],
+            vel: [1.8, 0.0, -1.2],
+            radius: 0.15,
+        });
+    }
+
     pub fn spawn_ball(&mut self) {
         if self.balls.len() < MAX_BALLS {
             self.balls.push(Ball::new_random());
