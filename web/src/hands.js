@@ -130,6 +130,15 @@ class HandTracker {
     return states[0].buttonB || states[1].buttonB;
   }
 
+  /** Get the right hand's wrist joint (for watch attachment) */
+  getRightWrist() {
+    const hand = this.hands[1]; // right hand
+    if (!hand) return null;
+    const joints = hand.handGroup.joints;
+    if (!joints || !joints['wrist'] || !joints['wrist'].visible) return null;
+    return joints['wrist'];
+  }
+
   /** Update joint sphere rendering */
   updateVisuals() {
     for (const hand of this.hands) {

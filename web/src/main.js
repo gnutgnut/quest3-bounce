@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { ensureAudioContext, playBounce, playHandHit, playGameOver, playHotReload, playSpawn } from './audio.js';
 import { initHandTracking } from './hands.js';
+import { PerfWatch } from './watch.js';
 import init, { World } from '../pkg/bounce_physics.js';
 
 const VERSION = '0.5.0';
@@ -223,6 +224,9 @@ async function main() {
   // Hand tracking
   const handTracker = initHandTracking(renderer, scene);
 
+  // Perf watch on right wrist
+  const perfWatch = new PerfWatch(scene);
+
   // Version splash
   const versionSprite = createTextSprite(`v${VERSION}`, 48);
   versionSprite.position.set(0, 2.2, -1.5);
@@ -372,6 +376,9 @@ async function main() {
     for (const bl of ballLights) {
       bl.light.intensity = Math.max(2, bl.light.intensity * 0.95);
     }
+
+    // Update perf watch on right wrist
+    perfWatch.update(dt, handTracker.getRightWrist());
 
     // Version splash fade
     if (!versionFadeStart) versionFadeStart = elapsed;
