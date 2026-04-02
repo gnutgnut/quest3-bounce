@@ -6,7 +6,7 @@ import { PerfWatch } from './watch.js';
 import { MusicEngine } from './music.js';
 import init, { World } from '../pkg/bounce_physics.js';
 
-const VERSION = '0.6.17';
+const VERSION = '0.6.18';
 const SPAWN_INTERVAL_START = 15.0;
 const SPAWN_INTERVAL_MIN = 2.0;
 const SPAWN_ACCEL = 0.95; // multiply interval by this each spawn
@@ -430,7 +430,16 @@ async function main() {
   const info = document.getElementById('info');
   if (info) info.textContent = `quest3-bounce v${VERSION} — Click to enable audio`;
 
-  document.addEventListener('click', () => ensureAudioContext(), { once: true });
+  // Enable audio on any interaction
+  function enableAudio() {
+    ensureAudioContext();
+    document.removeEventListener('click', enableAudio);
+    document.removeEventListener('touchstart', enableAudio);
+    document.removeEventListener('pointerdown', enableAudio);
+  }
+  document.addEventListener('click', enableAudio);
+  document.addEventListener('touchstart', enableAudio, { passive: true });
+  document.addEventListener('pointerdown', enableAudio);
 
   // Spawn timer
   let spawnInterval = SPAWN_INTERVAL_START;
