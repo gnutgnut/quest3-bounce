@@ -248,6 +248,35 @@ impl World {
             ball.vel[2] += vz;
         }
     }
+
+    /// Serialize all ball state to a flat array: [count, x,y,z,vx,vy,vz, ...]
+    pub fn serialize_state(&self) -> Vec<f32> {
+        let mut data = Vec::with_capacity(1 + self.balls.len() * 6);
+        data.push(self.balls.len() as f32);
+        for ball in &self.balls {
+            data.extend_from_slice(&ball.pos);
+            data.extend_from_slice(&ball.vel);
+        }
+        data
+    }
+
+    /// Restore ball state from serialized data. Clears existing balls.
+    pub fn restore_state(&mut self, data: &[f32]) {
+        self.balls.clear();
+        if data.is_empty() { return; }
+        let count = data[0] as usize;
+        let mut i = 1;
+        for _ in 0..count {
+            if i + 5 >= data.len() { break; }
+            self.balls.push(Ball {
+                pos: [data[i], data[i + 1], data[i + 2]],
+                vel: [data[i + 3], data[i + 4], data[i + 5]],
+                radius: 0.15,
+            });
+            i += 6;
+        }
+        self.game_over = self.balls.len() >= MAX_BALLS;
+    }
 }
 
 fn pseudo_random() -> f32 {

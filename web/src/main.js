@@ -4,8 +4,9 @@ import { ensureAudioContext, playBounce, playHandHit } from './audio.js';
 import { initHandTracking } from './hands.js';
 import init, { World } from '../pkg/bounce_physics.js';
 
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 const SPAWN_INTERVAL = 15.0;
+const VERSION_POLL_INTERVAL = 10000; // 10 seconds
 const BALL_COLORS = [
   0xff4488, 0x44ff88, 0x4488ff, 0xffaa22, 0xaa44ff,
   0xff44cc, 0x44ffcc, 0xccff44, 0xff6644, 0x44aaff,
@@ -14,6 +15,24 @@ const BALL_COLORS = [
 async function main() {
   await init();
   const world = new World();
+
+  // Restore state from hot reload if available
+  let restoredElapsed = 0;
+  let restoredLastSpawn = 0;
+  const savedState = sessionStorage.getItem('hotReloadState');
+  if (savedState) {
+    try {
+      const { balls, elapsed, lastSpawn } = JSON.parse(savedState);
+      if (balls && balls.length > 0) {
+        world.restore_state(new Float32Array(balls));
+        restoredElapsed = elapsed || 0;
+        restoredLastSpawn = lastSpawn || 0;
+      }
+    } catch (e) { /* ignore corrupt state */ }
+    sessionStorage.removeItem('hotReloadState');
+  }
+  const wasHotReload = sessionStorage.getItem('hotReload') === '1';
+  sessionStorage.removeItem('hotReload');
 
   // Scene
   const scene = new THREE.Scene();
@@ -37,6 +56,53 @@ async function main() {
   const sessionInit = { optionalFeatures: ['hand-tracking'] };
   document.body.appendChild(VRButton.createButton(renderer, sessionInit));
   renderer.xr.addEventListener('sessionstart', () => ensureAudioContext());
+
+  // Auto-enter VR after hot reload (requires user gesture on most browsers, but Quest 3 may allow it)
+  if (wasHotReload && navigator.xr) {
+    navigator.xr.requestSession('immersive-vr', sessionInit).then((session) => {
+      renderer.xr.setSession(session);
+      ensureAudioContext();
+    }).catch(() => { /* user will click Enter VR manually */ });
+  }
+
+  // Version polling for hot reload
+  let knownVersion = null;
+  async function checkVersion() {
+    try {
+      const base = import.meta.env.BASE_URL || '/';
+      const res = await fetch(`${base}version.json`, { cache: 'no-store' });
+      if (!res.ok) return;
+      const { v } = await res.json();
+      if (knownVersion === null) {
+        knownVersion = v;
+      } else if (v !== knownVersion) {
+        triggerHotReload();
+      }
+    } catch (e) { /* network error, skip */ }
+  }
+
+  function triggerHotReload() {
+    // Save game state
+    const stateArray = Array.from(world.serialize_state());
+    const elapsed = clock.elapsedTime + restoredElapsed;
+    sessionStorage.setItem('hotReloadState', JSON.stringify({
+      balls: stateArray,
+      elapsed,
+      lastSpawn: lastSpawnTime,
+    }));
+    sessionStorage.setItem('hotReload', '1');
+
+    // End XR session if active, then reload
+    const session = renderer.xr.getSession();
+    if (session) {
+      session.end().then(() => location.reload()).catch(() => location.reload());
+    } else {
+      location.reload();
+    }
+  }
+
+  setInterval(checkVersion, VERSION_POLL_INTERVAL);
+  checkVersion(); // establish baseline immediately
 
   // Room
   const roomW = 4, roomH = 3, roomD = 4;
@@ -142,7 +208,7 @@ async function main() {
   document.addEventListener('click', () => ensureAudioContext(), { once: true });
 
   // Spawn timer
-  let lastSpawnTime = 0;
+  let lastSpawnTime = restoredLastSpawn;
   let gameOver = false;
 
   // Game over splash (hidden initially)
@@ -162,7 +228,7 @@ async function main() {
     }
 
     const dt = Math.min(clock.getDelta(), 0.05);
-    const elapsed = clock.elapsedTime;
+    const elapsed = clock.elapsedTime + restoredElapsed;
 
     // Spawn a new ball every SPAWN_INTERVAL seconds
     if (elapsed - lastSpawnTime > SPAWN_INTERVAL) {
