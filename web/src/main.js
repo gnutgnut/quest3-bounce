@@ -6,7 +6,7 @@ import { PerfWatch } from './watch.js';
 import { MusicEngine } from './music.js';
 import init, { World } from '../pkg/bounce_physics.js';
 
-const VERSION = '0.6.16';
+const VERSION = '0.6.17';
 const SPAWN_INTERVAL_START = 15.0;
 const SPAWN_INTERVAL_MIN = 2.0;
 const SPAWN_ACCEL = 0.95; // multiply interval by this each spawn
@@ -55,6 +55,88 @@ async function main() {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.xr.enabled = true;
   document.body.appendChild(renderer.domElement);
+
+  // Touch/mouse orbit for non-XR (phone/desktop)
+  let orbitYaw = 0, orbitPitch = 0;
+  const orbitCenter = new THREE.Vector3(0, 1.2, 0);
+  const orbitRadius = 2.8;
+  let dragActive = false, dragX = 0, dragY = 0;
+
+  function updateOrbitCamera() {
+    if (renderer.xr.isPresenting) return; // XR handles its own camera
+    const cy = Math.cos(orbitYaw), sy = Math.sin(orbitYaw);
+    const cp = Math.cos(orbitPitch), sp = Math.sin(orbitPitch);
+    camera.position.set(
+      orbitCenter.x + orbitRadius * sy * cp,
+      orbitCenter.y + orbitRadius * sp,
+      orbitCenter.z + orbitRadius * cy * cp,
+    );
+    camera.lookAt(orbitCenter);
+  }
+
+  function onDragStart(x, y) { dragActive = true; dragX = x; dragY = y; }
+  function onDragMove(x, y) {
+    if (!dragActive) return;
+    orbitYaw += (x - dragX) * 0.005;
+    orbitPitch = Math.max(-0.8, Math.min(0.8, orbitPitch + (y - dragY) * 0.005));
+    dragX = x; dragY = y;
+    updateOrbitCamera();
+  }
+  function onDragEnd() { dragActive = false; }
+
+  renderer.domElement.addEventListener('mousedown', e => onDragStart(e.clientX, e.clientY));
+  renderer.domElement.addEventListener('mousemove', e => onDragMove(e.clientX, e.clientY));
+  renderer.domElement.addEventListener('mouseup', onDragEnd);
+  renderer.domElement.addEventListener('touchstart', e => {
+    if (e.touches.length === 1) onDragStart(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: true });
+  renderer.domElement.addEventListener('touchmove', e => {
+    if (e.touches.length === 1) onDragMove(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: true });
+  renderer.domElement.addEventListener('touchend', onDragEnd);
+
+  updateOrbitCamera();
+
+  // Device orientation (phone gyroscope) — rotate camera by tilting phone
+  let deviceOrientAlpha = 0, deviceOrientBeta = 0;
+  let hasDeviceOrient = false;
+
+  function onDeviceOrientation(e) {
+    if (e.alpha === null) return;
+    hasDeviceOrient = true;
+    deviceOrientAlpha = (e.alpha || 0) * Math.PI / 180;
+    deviceOrientBeta = (e.beta || 0) * Math.PI / 180;
+  }
+
+  function updateDeviceOrientCamera() {
+    if (renderer.xr.isPresenting || !hasDeviceOrient) return;
+    // Phone held upright: beta ~90deg = looking forward
+    const yaw = -deviceOrientAlpha;
+    const pitch = -(deviceOrientBeta - Math.PI / 2);
+    const cy = Math.cos(yaw), sy = Math.sin(yaw);
+    const cp = Math.cos(pitch), sp = Math.sin(pitch);
+    camera.position.copy(orbitCenter);
+    const lookTarget = new THREE.Vector3(
+      orbitCenter.x + sy * cp,
+      orbitCenter.y + sp,
+      orbitCenter.z + cy * cp,
+    );
+    camera.lookAt(lookTarget);
+  }
+
+  // Request permission on iOS 13+
+  if (typeof DeviceOrientationEvent !== 'undefined' &&
+      typeof DeviceOrientationEvent.requestPermission === 'function') {
+    renderer.domElement.addEventListener('click', () => {
+      DeviceOrientationEvent.requestPermission().then(state => {
+        if (state === 'granted') {
+          window.addEventListener('deviceorientation', onDeviceOrientation, true);
+        }
+      }).catch(() => {});
+    }, { once: true });
+  } else {
+    window.addEventListener('deviceorientation', onDeviceOrientation, true);
+  }
 
   // VR button
   const sessionInit = { optionalFeatures: ['hand-tracking'] };
@@ -610,6 +692,7 @@ async function main() {
       }
     }
 
+    updateDeviceOrientCamera();
     renderer.render(scene, camera);
   });
 
