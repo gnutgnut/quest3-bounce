@@ -5,7 +5,7 @@ import { initHandTracking } from './hands.js';
 import { PerfWatch } from './watch.js';
 import init, { World } from '../pkg/bounce_physics.js';
 
-const VERSION = '0.6.7';
+const VERSION = '0.6.8';
 const SPAWN_INTERVAL_START = 15.0;
 const SPAWN_INTERVAL_MIN = 2.0;
 const SPAWN_ACCEL = 0.95; // multiply interval by this each spawn
@@ -408,6 +408,7 @@ async function main() {
       if (sinceWin > WINNER_DURATION) {
         restartGame(elapsed);
       }
+      handTracker.updateBlade(world, dt);
       handTracker.update(world, dt);
       perfWatch.update(dt, handTracker.getRightWrist());
       renderer.render(scene, camera);
