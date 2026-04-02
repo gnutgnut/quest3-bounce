@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
-import { ensureAudioContext, playBounce, playHandHit, playGameOver, playHotReload, playSpawn, playPop } from './audio.js';
+import { ensureAudioContext, playBounce, playHandHit, playGameOver, playHotReload, playSpawn, playPop, playWinner } from './audio.js';
 import { initHandTracking } from './hands.js';
 import { PerfWatch } from './watch.js';
 import init, { World } from '../pkg/bounce_physics.js';
 
-const VERSION = '0.6.2';
+const VERSION = '0.6.3';
 const SPAWN_INTERVAL = 15.0;
 const VERSION_POLL_INTERVAL = 10000; // 10 seconds
 const BALL_COLORS = [
@@ -294,7 +294,10 @@ async function main() {
   let lastSpawnTime = restoredLastSpawn;
   let gameOver = false;
   let gameOverTime = 0;
-  const GAME_OVER_DURATION = 4.0; // seconds to show game over before restart
+  let winnerActive = false;
+  let winnerTime = 0;
+  const GAME_OVER_DURATION = 4.0;
+  const WINNER_DURATION = 5.0;
 
   // Game over splash (hidden initially)
   const gameOverSprite = createTextSprite('GAME OVER', 64);
@@ -303,20 +306,74 @@ async function main() {
   gameOverSprite.visible = false;
   scene.add(gameOverSprite);
 
+  // Winner splash
+  const winnerSprite = createTextSprite('WINNER!', 64);
+  winnerSprite.position.set(0, 1.6, -1.0);
+  winnerSprite.scale.set(1.5, 0.4, 1);
+  winnerSprite.visible = false;
+  scene.add(winnerSprite);
+
+  // Celebration particles
+  const celebParticles = [];
+  const celebGeo = new THREE.SphereGeometry(0.03, 8, 8);
+
+  function spawnCelebration() {
+    for (let i = 0; i < 40; i++) {
+      const color = BALL_COLORS[i % BALL_COLORS.length];
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1.0 });
+      const mesh = new THREE.Mesh(celebGeo, mat);
+      mesh.position.set(
+        (Math.random() - 0.5) * 2,
+        1.2 + Math.random() * 1.0,
+        -0.5 + (Math.random() - 0.5) * 2,
+      );
+      const vel = new THREE.Vector3(
+        (Math.random() - 0.5) * 4,
+        2 + Math.random() * 4,
+        (Math.random() - 0.5) * 4,
+      );
+      scene.add(mesh);
+      celebParticles.push({ mesh, vel, life: 1.0 });
+    }
+  }
+
+  function updateCelebration(dt) {
+    for (let i = celebParticles.length - 1; i >= 0; i--) {
+      const p = celebParticles[i];
+      p.vel.y -= 6.0 * dt; // gravity
+      p.mesh.position.addScaledVector(p.vel, dt);
+      p.life -= dt * 0.4;
+      p.mesh.material.opacity = Math.max(0, p.life);
+      // Pulse scale for boingy effect
+      const pulse = 1.0 + 0.3 * Math.sin(p.life * 20);
+      p.mesh.scale.setScalar(pulse);
+      if (p.life <= 0) {
+        scene.remove(p.mesh);
+        celebParticles.splice(i, 1);
+      }
+    }
+  }
+
+  function clearCelebration() {
+    for (const p of celebParticles) scene.remove(p.mesh);
+    celebParticles.length = 0;
+  }
+
   function restartGame(elapsed) {
     world.reset();
-    // Remove extra ball meshes from scene
     while (ballMeshes.length > 1) {
       const mesh = ballMeshes.pop();
       scene.remove(mesh);
     }
-    // Remove extra lights
     while (ballLights.length > 1) {
       const bl = ballLights.pop();
       scene.remove(bl.light);
     }
     gameOver = false;
+    winnerActive = false;
     gameOverSprite.visible = false;
+    winnerSprite.visible = false;
+    clearCelebration();
     lastSpawnTime = elapsed;
     restoredElapsed = 0;
     updateCounter(world.ball_count());
@@ -329,8 +386,27 @@ async function main() {
     const dt = Math.min(clock.getDelta(), 0.05);
     const elapsed = clock.elapsedTime + restoredElapsed;
 
+    if (winnerActive) {
+      const sinceWin = elapsed - winnerTime;
+      updateCelebration(dt);
+      // Pulsing rainbow text
+      const hue = (sinceWin * 120) % 360;
+      winnerSprite.material.color.setHSL(hue / 360, 1, 0.7);
+      // Boingy scale pulse
+      const scale = 1.5 + 0.3 * Math.sin(sinceWin * 8);
+      winnerSprite.scale.set(scale, scale * 0.27, 1);
+      if (sinceWin > WINNER_DURATION - 1) {
+        winnerSprite.material.opacity = Math.max(0, WINNER_DURATION - sinceWin);
+      }
+      if (sinceWin > WINNER_DURATION) {
+        restartGame(elapsed);
+      }
+      perfWatch.update(dt, handTracker.getRightWrist());
+      renderer.render(scene, camera);
+      return;
+    }
+
     if (gameOver) {
-      // Fade out game over sprite, then restart
       const sinceOver = elapsed - gameOverTime;
       if (sinceOver > GAME_OVER_DURATION) {
         restartGame(elapsed);
@@ -399,6 +475,19 @@ async function main() {
     for (const pop of pops) {
       removeBallMesh(pop.ballIndex);
       playPop(pop.x, pop.y, pop.z);
+    }
+
+    // Check for winner — all balls destroyed!
+    if (pops.length > 0 && world.ball_count() === 0) {
+      winnerActive = true;
+      winnerTime = elapsed;
+      winnerSprite.visible = true;
+      winnerSprite.material.opacity = 1.0;
+      spawnCelebration();
+      playWinner();
+      updateCounter(0);
+      renderer.render(scene, camera);
+      return;
     }
 
     // Hand tracking collisions

@@ -485,3 +485,96 @@ export function playBladeSwoosh(speed) {
   osc.connect(gain).connect(filter).connect(ctx.destination);
   osc.start(now); osc.stop(now + duration);
 }
+
+/**
+ * Play a bingy-boingy winner celebration fanfare.
+ * Ascending arpeggiated chime sequence with sparkly tail.
+ */
+export function playWinner() {
+  const ctx = ensureAudioContext();
+  if (!ctx) return;
+
+  const now = ctx.currentTime;
+
+  // Ascending major arpeggio notes (C5, E5, G5, C6, E6, G6, C7)
+  const notes = [523, 659, 784, 1047, 1319, 1568, 2093];
+  const noteGap = 0.12;
+
+  for (let i = 0; i < notes.length; i++) {
+    const t = now + i * noteGap;
+    const freq = notes[i];
+
+    // Main chime
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, t);
+
+    // Boingy pitch wobble
+    const wobble = ctx.createOscillator();
+    wobble.type = 'sine';
+    wobble.frequency.value = 15 - i * 1.5;
+    const wobbleAmt = ctx.createGain();
+    wobbleAmt.gain.value = freq * 0.02;
+    wobble.connect(wobbleAmt);
+    wobbleAmt.connect(osc.frequency);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.001, t);
+    gain.gain.linearRampToValueAtTime(0.25, t + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+
+    // Shimmer overtone
+    const shimmer = ctx.createOscillator();
+    shimmer.type = 'triangle';
+    shimmer.frequency.setValueAtTime(freq * 2.01, t);
+    const shimGain = ctx.createGain();
+    shimGain.gain.setValueAtTime(0.001, t);
+    shimGain.gain.linearRampToValueAtTime(0.08, t + 0.02);
+    shimGain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+
+    osc.connect(gain).connect(ctx.destination);
+    shimmer.connect(shimGain).connect(ctx.destination);
+
+    osc.start(t); osc.stop(t + 0.6);
+    shimmer.start(t); shimmer.stop(t + 0.4);
+    wobble.start(t); wobble.stop(t + 0.6);
+  }
+
+  // Final sparkly wash after arpeggio
+  const washStart = now + notes.length * noteGap;
+  const washDur = 2.0;
+
+  const wash1 = ctx.createOscillator();
+  wash1.type = 'sine';
+  wash1.frequency.setValueAtTime(2093, washStart);
+  wash1.frequency.exponentialRampToValueAtTime(4186, washStart + washDur * 0.3);
+  wash1.frequency.exponentialRampToValueAtTime(2093, washStart + washDur);
+
+  const wash2 = ctx.createOscillator();
+  wash2.type = 'triangle';
+  wash2.frequency.setValueAtTime(2637, washStart);
+  wash2.frequency.exponentialRampToValueAtTime(5274, washStart + washDur * 0.3);
+  wash2.frequency.exponentialRampToValueAtTime(1319, washStart + washDur);
+
+  // Tremolo on the wash
+  const tremLfo = ctx.createOscillator();
+  tremLfo.type = 'sine';
+  tremLfo.frequency.value = 8;
+  const tremAmt = ctx.createGain();
+  tremAmt.gain.value = 0.15;
+  tremLfo.connect(tremAmt);
+
+  const washGain = ctx.createGain();
+  washGain.gain.setValueAtTime(0.001, washStart);
+  washGain.gain.linearRampToValueAtTime(0.2, washStart + 0.1);
+  washGain.gain.setValueAtTime(0.2, washStart + washDur * 0.5);
+  washGain.gain.exponentialRampToValueAtTime(0.001, washStart + washDur);
+  tremAmt.connect(washGain.gain);
+
+  wash1.connect(washGain).connect(ctx.destination);
+  wash2.connect(washGain);
+
+  wash1.start(washStart); wash1.stop(washStart + washDur);
+  wash2.start(washStart); wash2.stop(washStart + washDur);
+  tremLfo.start(washStart); tremLfo.stop(washStart + washDur);
+}
