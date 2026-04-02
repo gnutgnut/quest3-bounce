@@ -140,6 +140,14 @@ impl World {
                 ball.vel[0] += dx * inv_dist * force * dt;
                 ball.vel[1] += dy * inv_dist * force * dt;
                 ball.vel[2] += dz * inv_dist * force * dt;
+
+                // Damping — bleed off velocity when close to attractor (prevents orbit oscillation)
+                if dist < 0.8 && strength_mult > 1.0 {
+                    let damp = 1.0 - (3.0 * dt).min(0.9) * (1.0 - dist / 0.8);
+                    ball.vel[0] *= damp;
+                    ball.vel[1] *= damp;
+                    ball.vel[2] *= damp;
+                }
             }
 
             // Integrate
