@@ -74,9 +74,8 @@ export class PerfWatch {
     this._pos = new THREE.Vector3();
     this._quat = new THREE.Quaternion();
     this._rotOffset = new THREE.Quaternion()
-      .setFromAxisAngle(new THREE.Vector3(0, 1, 0), -Math.PI / 2)
-      .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI));
-    this._offset = new THREE.Vector3(0, 0.02, 0); // above wrist
+      .setFromAxisAngle(new THREE.Vector3(0, 1, 0), -Math.PI / 2);
+    this._offset = new THREE.Vector3(0, -0.02, 0); // below wrist (inner/palm side)
   }
 
   /**

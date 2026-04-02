@@ -28,6 +28,23 @@ const MELODY_PATTERNS = [
   [24,26,24,19, null,null,null,null, 17,19,17,12, null,null,null,null],
 ];
 
+// Breakbeat drum patterns — K=kick S=snare s=ghost H=hat h=soft O=open
+// 16 ticks per bar, syncopated amen-style
+const DRUM_PATTERNS = [
+  // Classic breakbeat
+  ['KH','','h','', 'SH','','h','Ks', 'KH','s','h','', 'SH','','hK','s'],
+  // Syncopated funk
+  ['KH','','','Kh', 'SH','','h','', 'KH','s','','Kh', 'SO','','h','s'],
+  // Double-time break
+  ['KH','h','Kh','h', 'SH','h','sh','Kh', 'KH','h','sh','h', 'SH','Kh','sh','s'],
+  // Half-time heavy
+  ['KH','','','', 'SH','','h','', 'KO','','s','Kh', 'SH','','h','s'],
+  // Jungle-ish chop
+  ['KH','','sh','K', 'SH','Kh','','s', 'KH','s','Kh','', 'SO','Kh','sh','s'],
+  // Wonky break
+  ['KH','','h','', 'SO','','Kh','s', 'hK','','sh','K', 'SH','s','Kh',''],
+];
+
 // Chord progressions (root offsets for each bar)
 const PROGRESSIONS = [
   [0, 5, 7, 3],   // I IV V iii
@@ -59,6 +76,7 @@ export class MusicEngine {
     this.bassPattern = 0;
     this.arpPattern = 0;
     this.melodyPattern = 0;
+    this.drumPattern = 0;
     this.intensity = 0;
     this.targetIntensity = 0;
 
@@ -226,59 +244,77 @@ export class MusicEngine {
 
   _playDrums(now) {
     const beat = this.tick % TICKS_PER_BAR;
-    const dur = 0.05;
+    const pat = this.drumPattern % DRUM_PATTERNS.length;
+    const row = DRUM_PATTERNS[pat][beat];
+    if (!row) return;
 
-    // Kick on beats 0, 8
-    if (beat === 0 || beat === 8) {
-      const osc = this.ctx.createOscillator();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(150, now);
-      osc.frequency.exponentialRampToValueAtTime(40, now + 0.08);
-      const gain = this.ctx.createGain();
-      gain.gain.setValueAtTime(0.3, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
-      osc.connect(gain).connect(this.masterGain);
-      osc.start(now);
-      osc.stop(now + 0.12);
-    }
+    if (row.includes('K')) this._kick(now);
+    if (row.includes('S')) this._snare(now, 0.18);
+    if (row.includes('s')) this._snare(now, 0.07); // ghost snare
+    if (row.includes('H')) this._hat(now, 0.07, 0.05);
+    if (row.includes('h')) this._hat(now, 0.03, 0.03); // soft hat
+    if (row.includes('O')) this._hat(now, 0.06, 0.12); // open hat
+  }
 
-    // Hi-hat on every other tick (at higher intensity)
-    if (this.intensity > 0.3 && beat % 2 === 0) {
-      const osc = this.ctx.createOscillator();
-      osc.type = 'square';
-      osc.frequency.setValueAtTime(8000 + Math.random() * 4000, now);
-      const gain = this.ctx.createGain();
-      const vol = beat % 4 === 0 ? 0.06 : 0.03; // accent on beats
-      gain.gain.setValueAtTime(vol, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
-      const filter = this.ctx.createBiquadFilter();
-      filter.type = 'highpass';
-      filter.frequency.value = 7000;
-      osc.connect(gain).connect(filter).connect(this.masterGain);
-      osc.start(now);
-      osc.stop(now + dur);
-    }
+  _kick(now) {
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(160, now);
+    osc.frequency.exponentialRampToValueAtTime(35, now + 0.1);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.35, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+    // Click transient
+    const click = this.ctx.createOscillator();
+    click.type = 'square';
+    click.frequency.setValueAtTime(800, now);
+    click.frequency.exponentialRampToValueAtTime(100, now + 0.01);
+    const cGain = this.ctx.createGain();
+    cGain.gain.setValueAtTime(0.15, now);
+    cGain.gain.exponentialRampToValueAtTime(0.001, now + 0.015);
+    osc.connect(gain).connect(this.masterGain);
+    click.connect(cGain).connect(this.masterGain);
+    osc.start(now); osc.stop(now + 0.15);
+    click.start(now); click.stop(now + 0.02);
+  }
 
-    // Snare on beats 4, 12
-    if (beat === 4 || beat === 12) {
-      const osc = this.ctx.createOscillator();
-      osc.type = 'square';
-      osc.frequency.setValueAtTime(300, now);
-      osc.frequency.exponentialRampToValueAtTime(100, now + 0.05);
-      const noise = this.ctx.createOscillator();
-      noise.type = 'sawtooth';
-      noise.frequency.setValueAtTime(5000 + Math.random() * 3000, now);
-      const gain = this.ctx.createGain();
-      gain.gain.setValueAtTime(0.15, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
-      const nGain = this.ctx.createGain();
-      nGain.gain.setValueAtTime(0.08, now);
-      nGain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
-      osc.connect(gain).connect(this.masterGain);
-      noise.connect(nGain).connect(this.masterGain);
-      osc.start(now); osc.stop(now + 0.1);
-      noise.start(now); noise.stop(now + 0.08);
-    }
+  _snare(now, vol) {
+    const osc = this.ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(250, now);
+    osc.frequency.exponentialRampToValueAtTime(120, now + 0.04);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(vol, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+    // Noise body
+    const noise = this.ctx.createOscillator();
+    noise.type = 'sawtooth';
+    noise.frequency.setValueAtTime(5000 + Math.random() * 4000, now);
+    const nGain = this.ctx.createGain();
+    nGain.gain.setValueAtTime(vol * 0.6, now);
+    nGain.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
+    const nFilter = this.ctx.createBiquadFilter();
+    nFilter.type = 'highpass';
+    nFilter.frequency.value = 3000;
+    osc.connect(gain).connect(this.masterGain);
+    noise.connect(nGain).connect(nFilter).connect(this.masterGain);
+    osc.start(now); osc.stop(now + 0.1);
+    noise.start(now); noise.stop(now + 0.09);
+  }
+
+  _hat(now, vol, dur) {
+    const osc = this.ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(8000 + Math.random() * 5000, now);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(vol, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'highpass';
+    filter.frequency.value = 7000;
+    osc.connect(gain).connect(filter).connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + dur + 0.01);
   }
 
   _onBarChange() {
@@ -288,6 +324,7 @@ export class MusicEngine {
       this.bassPattern = (this.bassPattern + 1) % BASS_PATTERNS.length;
       this.arpPattern = (this.arpPattern + 1) % ARP_PATTERNS.length;
       this.melodyPattern = (this.melodyPattern + 1) % MELODY_PATTERNS.length;
+      this.drumPattern = (this.drumPattern + 1) % DRUM_PATTERNS.length;
     }
 
     // Every 8 bars, change key and progression
