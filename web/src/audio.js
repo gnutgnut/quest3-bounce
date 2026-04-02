@@ -1,35 +1,78 @@
 let audioCtx = null;
 
 /**
- * Speak text in a robotic voice using Web Speech API.
- * Handles async voice loading on Quest/Chrome.
+ * Synthesized robot voice using oscillators — no Web Speech API needed.
+ * Maps characters to pitched beep sequences like an old-school computer.
  * @param {string} text
  */
 export function speakRobot(text) {
-  if (!window.speechSynthesis) return;
+  const ctx = ensureAudioContext();
+  if (!ctx) return;
 
-  function doSpeak() {
-    const utter = new SpeechSynthesisUtterance(text);
-    utter.pitch = 0.3;
-    utter.rate = 0.9;
-    utter.volume = 1.0;
-    const voices = speechSynthesis.getVoices();
-    const robot = voices.find(v => /en/i.test(v.lang) && /male/i.test(v.name))
-      || voices.find(v => /en[-_]/.test(v.lang))
-      || voices[0];
-    if (robot) utter.voice = robot;
-    speechSynthesis.cancel(); // clear any pending
-    speechSynthesis.speak(utter);
+  const now = ctx.currentTime;
+  const charDur = 0.08;
+  const gap = 0.03;
+  const wordGap = 0.12;
+
+  // Simple character-to-frequency mapping (vowels lower, consonants higher)
+  const vowels = 'aeiou';
+  const baseFreq = 180;
+
+  let t = now + 0.1;
+  for (const ch of text.toLowerCase()) {
+    if (ch === ' ' || ch === '.') {
+      t += wordGap;
+      continue;
+    }
+    if (ch < 'a' || ch > 'z') {
+      // Numbers/symbols: short click
+      if (ch >= '0' && ch <= '9') {
+        const freq = 300 + (ch.charCodeAt(0) - 48) * 60;
+        _robotTone(ctx, t, freq, charDur * 0.6, 0.15);
+        t += charDur * 0.6 + gap;
+      }
+      continue;
+    }
+
+    const code = ch.charCodeAt(0) - 97; // 0-25
+    const isVowel = vowels.includes(ch);
+    const freq = isVowel
+      ? baseFreq + code * 12  // vowels: warm low range
+      : 350 + code * 18;      // consonants: higher buzzy range
+    const dur = isVowel ? charDur * 1.2 : charDur * 0.7;
+    const type = isVowel ? 'triangle' : 'square';
+
+    _robotTone(ctx, t, freq, dur, 0.12, type);
+
+    // Formant overtone for vowels
+    if (isVowel) {
+      _robotTone(ctx, t, freq * 2.5, dur * 0.8, 0.04, 'sine');
+    }
+
+    t += dur + gap;
   }
 
-  // Voices may not be loaded yet — wait for them
-  if (speechSynthesis.getVoices().length > 0) {
-    doSpeak();
-  } else {
-    speechSynthesis.addEventListener('voiceschanged', doSpeak, { once: true });
-    // Fallback: try anyway after a short delay
-    setTimeout(doSpeak, 500);
-  }
+  // End beep
+  _robotTone(ctx, t + 0.05, 800, 0.06, 0.1, 'square');
+  _robotTone(ctx, t + 0.15, 1200, 0.06, 0.1, 'square');
+}
+
+function _robotTone(ctx, time, freq, dur, vol, type = 'square') {
+  const osc = ctx.createOscillator();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, time);
+  // Slight pitch wobble for character
+  osc.frequency.linearRampToValueAtTime(freq * 0.97, time + dur);
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.001, time);
+  gain.gain.linearRampToValueAtTime(vol, time + 0.005);
+  gain.gain.setValueAtTime(vol, time + dur * 0.7);
+  gain.gain.exponentialRampToValueAtTime(0.001, time + dur);
+
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(time);
+  osc.stop(time + dur + 0.01);
 }
 
 export function ensureAudioContext() {
