@@ -279,3 +279,79 @@ export function playHotReload() {
   tremoloLfo.start(now); tremoloLfo.stop(now + duration);
   vibratoLfo.start(now); vibratoLfo.stop(now + duration);
 }
+
+/**
+ * Play a squishy/farty/leathery dimensional-squeeze sound for ball spawn.
+ * Low gurgling pitch bend with formant wobble — like something squishing through a portal.
+ */
+export function playSpawn() {
+  const ctx = ensureAudioContext();
+  if (!ctx) return;
+
+  const now = ctx.currentTime;
+  const duration = 0.45;
+
+  // Main squelch — deep pitch that bends up then drops
+  const osc1 = ctx.createOscillator();
+  osc1.type = 'sawtooth';
+  osc1.frequency.setValueAtTime(50, now);
+  osc1.frequency.exponentialRampToValueAtTime(250, now + duration * 0.3);
+  osc1.frequency.exponentialRampToValueAtTime(60, now + duration);
+
+  // Formant wobble LFO — makes it sound fleshy/leathery
+  const wobbleLfo = ctx.createOscillator();
+  wobbleLfo.type = 'sine';
+  wobbleLfo.frequency.setValueAtTime(30, now);
+  wobbleLfo.frequency.linearRampToValueAtTime(8, now + duration);
+  const wobbleGain = ctx.createGain();
+  wobbleGain.gain.value = 60;
+  wobbleLfo.connect(wobbleGain);
+  wobbleGain.connect(osc1.frequency);
+
+  // Second voice — square wave fart undertone
+  const osc2 = ctx.createOscillator();
+  osc2.type = 'square';
+  osc2.frequency.setValueAtTime(35, now);
+  osc2.frequency.exponentialRampToValueAtTime(180, now + duration * 0.25);
+  osc2.frequency.exponentialRampToValueAtTime(40, now + duration);
+
+  // High squeeze — the "popping through" moment
+  const osc3 = ctx.createOscillator();
+  osc3.type = 'triangle';
+  osc3.frequency.setValueAtTime(800, now + duration * 0.2);
+  osc3.frequency.exponentialRampToValueAtTime(120, now + duration);
+
+  // Gain envelopes
+  const gain1 = ctx.createGain();
+  gain1.gain.setValueAtTime(0.001, now);
+  gain1.gain.linearRampToValueAtTime(0.35, now + duration * 0.15);
+  gain1.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+  const gain2 = ctx.createGain();
+  gain2.gain.setValueAtTime(0.001, now);
+  gain2.gain.linearRampToValueAtTime(0.2, now + duration * 0.2);
+  gain2.gain.exponentialRampToValueAtTime(0.001, now + duration * 0.7);
+
+  const gain3 = ctx.createGain();
+  gain3.gain.setValueAtTime(0.001, now);
+  gain3.gain.linearRampToValueAtTime(0.12, now + duration * 0.25);
+  gain3.gain.exponentialRampToValueAtTime(0.001, now + duration * 0.5);
+
+  // Resonant filter — gives the squelchy formant character
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'bandpass';
+  filter.frequency.setValueAtTime(200, now);
+  filter.frequency.exponentialRampToValueAtTime(800, now + duration * 0.3);
+  filter.frequency.exponentialRampToValueAtTime(150, now + duration);
+  filter.Q.value = 8;
+
+  osc1.connect(gain1).connect(filter);
+  osc2.connect(gain2).connect(filter);
+  osc3.connect(gain3).connect(ctx.destination);
+  filter.connect(ctx.destination);
+
+  osc1.start(now); osc1.stop(now + duration);
+  osc2.start(now); osc2.stop(now + duration);
+  osc3.start(now + duration * 0.2); osc3.stop(now + duration);
+  wobbleLfo.start(now); wobbleLfo.stop(now + duration);
+}

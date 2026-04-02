@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
-import { ensureAudioContext, playBounce, playHandHit, playGameOver, playHotReload } from './audio.js';
+import { ensureAudioContext, playBounce, playHandHit, playGameOver, playHotReload, playSpawn } from './audio.js';
 import { initHandTracking } from './hands.js';
 import init, { World } from '../pkg/bounce_physics.js';
 
@@ -261,6 +261,7 @@ async function main() {
     // Spawn a new ball every SPAWN_INTERVAL seconds
     if (elapsed - lastSpawnTime > SPAWN_INTERVAL) {
       world.spawn_ball();
+      playSpawn();
       lastSpawnTime = elapsed;
     }
 
