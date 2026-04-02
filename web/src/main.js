@@ -192,6 +192,33 @@ async function main() {
   dirLight.shadow.mapSize.height = 1024;
   scene.add(dirLight);
 
+  // Ball counter on back wall
+  const counterCanvas = document.createElement('canvas');
+  counterCanvas.width = 1024;
+  counterCanvas.height = 512;
+  const counterTexture = new THREE.CanvasTexture(counterCanvas);
+  const counterMat = new THREE.MeshBasicMaterial({
+    map: counterTexture, transparent: true, depthTest: false,
+  });
+  const counterMesh = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 1.6), counterMat);
+  counterMesh.position.set(0, roomH / 2, -roomD / 2 + 0.01);
+  scene.add(counterMesh);
+  let lastCounterValue = -1;
+
+  function updateCounter(count) {
+    if (count === lastCounterValue) return;
+    lastCounterValue = count;
+    const ctx = counterCanvas.getContext('2d');
+    ctx.clearRect(0, 0, counterCanvas.width, counterCanvas.height);
+    ctx.font = 'bold 280px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(136, 204, 255, 0.7)';
+    ctx.fillText(String(count), counterCanvas.width / 2, counterCanvas.height / 2);
+    counterTexture.needsUpdate = true;
+  }
+  updateCounter(world.ball_count());
+
   // Hand tracking
   const handTracker = initHandTracking(renderer, scene);
 
@@ -261,8 +288,9 @@ async function main() {
     // Ensure we have meshes for all balls
     ensureBallMeshes();
 
-    // Update ball positions
+    // Update ball counter
     const count = world.ball_count();
+    updateCounter(count);
     for (let i = 0; i < count; i++) {
       ballMeshes[i].position.set(
         world.get_ball_x(i),
