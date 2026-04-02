@@ -3,9 +3,10 @@ import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { ensureAudioContext, speakRobot, playBounce, playHandHit, playGameOver, playHotReload, playSpawn, playPop, playWinner } from './audio.js';
 import { initHandTracking } from './hands.js';
 import { PerfWatch } from './watch.js';
+import { MusicEngine } from './music.js';
 import init, { World } from '../pkg/bounce_physics.js';
 
-const VERSION = '0.6.11';
+const VERSION = '0.6.12';
 const SPAWN_INTERVAL_START = 15.0;
 const SPAWN_INTERVAL_MIN = 2.0;
 const SPAWN_ACCEL = 0.95; // multiply interval by this each spawn
@@ -283,6 +284,10 @@ async function main() {
   // Perf watch on right wrist
   const perfWatch = new PerfWatch(scene);
 
+  // Chiptune music engine
+  const music = new MusicEngine();
+  const MAX_BALLS_DISPLAY = 20; // match Rust MAX_BALLS for intensity scaling
+
   // Version splash
   const versionSprite = createTextSprite(`v${VERSION}`, 48);
   versionSprite.position.set(0, 2.2, -1.5);
@@ -410,6 +415,7 @@ async function main() {
       }
       handTracker.updateBlade(world, dt);
       handTracker.update(world, dt);
+      music.update(dt, 0, MAX_BALLS_DISPLAY);
       perfWatch.update(dt, handTracker.getRightWrist());
       renderer.render(scene, camera);
       return;
@@ -441,6 +447,7 @@ async function main() {
       gameOverSprite.visible = true;
       gameOverSprite.material.opacity = 1.0;
       playGameOver();
+      music.gameOverDarken();
       if (info) info.textContent = `GAME OVER — ${world.ball_count()} balls in ${Math.floor(elapsed)}s`;
       renderer.render(scene, camera);
       return;
@@ -495,6 +502,7 @@ async function main() {
       winnerSprite.material.opacity = 1.0;
       spawnCelebration();
       playWinner();
+      music.celebrationSwell();
       updateCounter(0);
       renderer.render(scene, camera);
       return;
@@ -534,7 +542,8 @@ async function main() {
       bl.light.intensity = Math.max(2, bl.light.intensity * 0.95);
     }
 
-    // Update perf watch on right wrist
+    // Update music and perf watch
+    music.update(dt, count, MAX_BALLS_DISPLAY);
     perfWatch.update(dt, handTracker.getRightWrist());
 
     // Version splash fade
