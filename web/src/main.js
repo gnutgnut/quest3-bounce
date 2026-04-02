@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
-import { ensureAudioContext, playBounce, playHandHit } from './audio.js';
+import { ensureAudioContext, playBounce, playHandHit, playGameOver } from './audio.js';
 import { initHandTracking } from './hands.js';
 import init, { World } from '../pkg/bounce_physics.js';
 
@@ -267,6 +267,7 @@ async function main() {
     if (world.is_game_over()) {
       gameOver = true;
       gameOverSprite.visible = true;
+      playGameOver();
       if (info) info.textContent = `GAME OVER — 1000 balls in ${Math.floor(elapsed)}s`;
       return;
     }
